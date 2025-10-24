@@ -1,8 +1,10 @@
 # WP Plugin Check - Issue Tracking
 
-**Last Updated:** 2025-10-24T20:46:41+01:00
+**Last Updated:** 2025-10-24T21:04:16+01:00
 
 **Version 4.0.18 Released:** Multiple security and coding standard fixes applied
+
+**Progress:** 12 files fixed (10 complete, 2 partial) | ~130+ issues resolved | 229 warnings remaining
 
 ## Summary
 This document tracks all issues found by `wp plugin check seo-wordpress` command.
@@ -189,6 +191,38 @@ wp plugin check seo-wordpress --require=./web/app/plugins/plugin-check/cli.php
 
 - [x] Line 50: `ValidatedSanitizedInput` - FIXED: Added isset() check and wp_unslash to $_REQUEST['s']
 - [ ] Lines 50: Minor nonce verification warnings (recommended, not required for search)
+
+---
+
+### 15. admin/seo-import-export.php
+**Status:** ✅ FIXED (only DB query warnings remain - acceptable for migration function)
+
+- [x] Line 8: `ValidatedSanitizedInput` - FIXED: Added isset() check and proper sanitization to $_POST['action']
+- [x] Line 12: `ValidatedSanitizedInput` - FIXED: Added isset(), wp_unslash and sanitize_text_field to nonce
+- [x] Line 58: `EscapeOutput` - FIXED: Added esc_attr() to wp_create_nonce output
+- [ ] Lines 46-48: DB query warnings (acceptable for one-time migration function)
+
+---
+
+### 16. css/xml-sitemap-xsl.php
+**Status:** ✅ FIXED (only enqueue warnings remain - acceptable for XSL stylesheet)
+
+- [x] Line 155: `EscapeOutput` - FIXED: Added esc_url() to get_bloginfo output
+- [x] Line 156: `ValidatedSanitizedInput` - FIXED: Added isset(), wp_unslash and sanitize_text_field to $_SERVER variables
+- [x] Line 156: `EscapeOutput` - FIXED: Added esc_url() to script src with sanitized server variables
+- [ ] Lines 155-156: Enqueue warnings (acceptable for XSL stylesheet context)
+
+---
+
+### 17. seo-taxonomy.php
+**Status:** ✅ FIXED (only minor nonce warnings remain - not required for GET)
+
+- [x] Line 7: `ValidatedSanitizedInput` - FIXED: Added isset(), wp_unslash and sanitize_text_field to $_GET['taxonomy']
+- [x] Line 19: `DeprecatedFunctions` - FIXED: Replaced stripslashes() with wp_unslash()
+- [x] Line 22: `EscapeOutput` - FIXED: Added esc_attr() and esc_html() to form label output
+- [x] Line 26: `EscapeOutput` - FIXED: Added esc_attr() to all input field attributes
+- [x] Line 27: `EscapeOutput` - FIXED: Added esc_html() to description output
+- [ ] Line 7: Minor nonce verification warnings (recommended, not required for GET requests)
 
 ---
 
