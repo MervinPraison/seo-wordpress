@@ -40,7 +40,7 @@ class ZEO_Breadcrumbs {
 	
 	function get_bc_title( $id_or_name, $type = 'post_type' ) {
 		$bctitle = zeo_get_value( 'bctitle', $id_or_name );
-		return ( !empty($bctitle) ) ? $bctitle : strip_tags( get_the_title( $id_or_name ) );
+		return ( !empty($bctitle) ) ? $bctitle : wp_strip_all_tags( get_the_title( $id_or_name ) );
 	}
 	
 	function get_term_parents($term, $taxonomy) {
