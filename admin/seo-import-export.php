@@ -5,11 +5,12 @@
 		$message_updated ="All in one SEO Pack migrated.";
 
 		// update options
-		if ($_POST['action'] && $_POST['action'] == 'aioseop-migrate') {
+		$action = isset($_POST['action']) ? sanitize_text_field( wp_unslash( $_POST['action'] ) ) : '';
+		if ( $action && $action == 'aioseop-migrate') {
 
 			/*NONCE Verification*/
 
-		$nonce = $_POST['aioseop-migrate-nonce'];
+		$nonce = isset($_POST['aioseop-migrate-nonce']) ? sanitize_text_field( wp_unslash( $_POST['aioseop-migrate-nonce'] ) ) : '';
 
 			if (!wp_verify_nonce($nonce, 'aioseop-migrate-nonce')) die ( 'Security Check - If you receive this in error, log out and back in to WordPress');
 
@@ -54,7 +55,7 @@ echo "<div class='updated fade' style='background-color:green;border-color:green
 <form name="aioseop-migrate" action="" method="post">
 <p class="submit">
 <input type="hidden" name="action" value="aioseop-migrate" />
-<input type="hidden" name="aioseop-migrate-nonce" value="<?php echo wp_create_nonce('aioseop-migrate-nonce'); ?>" />
+<input type="hidden" name="aioseop-migrate-nonce" value="<?php echo esc_attr( wp_create_nonce('aioseop-migrate-nonce') ); ?>" />
 <input type="submit" name="Submit" value="<?php _e('Migrate from All in One SEO', 'platinum_seo_pack')?> &raquo;" />
 </p>
 

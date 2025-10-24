@@ -4,10 +4,11 @@ class ZEO_Taxonomy {
 	
 	function __construct() {
 		$options = get_mervin_options();
+		$taxonomy = isset($_GET['taxonomy']) ? sanitize_text_field( wp_unslash( $_GET['taxonomy'] ) ) : '';
 		
-		if (is_admin() && isset($_GET['taxonomy']) && 
-			( !isset($options['tax-hideeditbox-'.$_GET['taxonomy']]) || !$options['tax-hideeditbox-'.$_GET['taxonomy']]) )
-			add_action($_GET['taxonomy'] . '_edit_form', array(&$this,'term_additions_form'), 10, 2 );
+		if (is_admin() && $taxonomy && 
+			( !isset($options['tax-hideeditbox-'.$taxonomy]) || !$options['tax-hideeditbox-'.$taxonomy]) )
+			add_action($taxonomy . '_edit_form', array(&$this,'term_additions_form'), 10, 2 );
 		
 		add_action('edit_term', array(&$this,'update_term'), 10, 3 );
 	}
@@ -15,15 +16,15 @@ class ZEO_Taxonomy {
 	function form_row( $id, $label, $desc, $tax_meta, $type = 'text', $options = '' ) {
 		$val = '';
 		if ( isset($tax_meta[$id]) )
-			$val = stripslashes($tax_meta[$id]);
+			$val = wp_unslash($tax_meta[$id]);
 		
 		echo '<tr class="form-field">'."\n";
-		echo "\t".'<th scope="row" valign="top"><label for="'.$id.'">'.$label.':</label></th>'."\n";
+		echo "\t".'<th scope="row" valign="top"><label for="'.esc_attr($id).'">'.esc_html($label).':</label></th>'."\n";
 		echo "\t".'<td>'."\n";
 		if ($type == 'text') {
 ?>
-			<input name="<?php echo $id; ?>" id="<?php echo $id; ?>" type="text" value="<?php echo $val; ?>" size="40"/>
-			<p class="description"><?php echo $desc; ?></p>
+			<input name="<?php echo esc_attr($id); ?>" id="<?php echo esc_attr($id); ?>" type="text" value="<?php echo esc_attr($val); ?>" size="40"/>
+			<p class="description"><?php echo esc_html($desc); ?></p>
 <?php	
 		} else if ($type == 'checkbox') {
 ?>

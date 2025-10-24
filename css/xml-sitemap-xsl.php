@@ -152,8 +152,8 @@ echo '<?xml version="1.0" encoding="UTF-8"?>';
 						</table>
 					</xsl:if>
 				</div>
-				<script type="text/javascript" src="<?php echo get_bloginfo( 'wpurl' ).'/wp-includes/js/jquery/jquery.js?ver=1.7.1'; ?>"></script>
-				<script type="text/javascript" src="<?php echo '//'.$_SERVER['HTTP_HOST'].str_replace('xml-sitemap-xsl.php','',$_SERVER['REQUEST_URI']); ?>jquery.tablesorter.min.js"></script>
+				<script type="text/javascript" src="<?php echo esc_url( get_bloginfo( 'wpurl' ).'/wp-includes/js/jquery/jquery.js?ver=1.7.1' ); ?>"></script>
+				<script type="text/javascript" src="<?php echo esc_url( '//' . ( isset($_SERVER['HTTP_HOST']) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) ) : '' ) . str_replace('xml-sitemap-xsl.php', '', ( isset($_SERVER['REQUEST_URI']) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '' ) ) . 'jquery.tablesorter.min.js' ); ?>"></script>
 				<script	type="text/javascript"><![CDATA[
 					$(document).ready(function() { 
 				        $("#sitemap").tablesorter( { widgets: ['zebra'] } ); 
