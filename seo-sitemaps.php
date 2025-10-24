@@ -162,7 +162,7 @@ class ZEO_Sitemaps {
 					$date = $this->get_last_modified( $post_type );
 				} else {
 					$date = $wpdb->get_var( $wpdb->prepare( "SELECT post_modified_gmt FROM $wpdb->posts WHERE post_status = 'publish' AND post_type = %s ORDER BY post_modified_gmt ASC LIMIT 1 OFFSET %d", $post_type, $i * 1000 + 999 ) );
-					$date = date( 'c', strtotime( $date ) );
+					$date = gmdate( 'c', strtotime( $date ) );
 				}
 
 				$this->sitemap .= '<sitemap>' . "\n";
@@ -498,7 +498,7 @@ class ZEO_Sitemaps {
 		if ( isset($url['mod']) )
 			$date = mysql2date( "Y-m-d\TH:i:s+00:00", $url['mod'] );
 		else
-			$date = date('c');
+			$date = gmdate('c');
 		$output = "\t<url>\n";
 		$output .= "\t\t<loc>".$url['loc']."</loc>\n";
 		$output .= "\t\t<lastmod>".$date."</lastmod>\n";
@@ -619,7 +619,7 @@ class ZEO_Sitemaps {
 		}
 
 		// Transform to W3C Date format.
-		$result = date( 'c', $result );
+		$result = gmdate( 'c', $result );
 		return $result;
 	}
 }
