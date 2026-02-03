@@ -1,0 +1,88 @@
+# WordPress.org SVN Deployment
+# 
+# This workflow is DISABLED by default.
+# It only runs when:
+#   1. Manually triggered via workflow_dispatch, OR
+#   2. A new tag matching v*.*.* is pushed
+#
+# To deploy: Create a tag like v4.0.18 and push it
+#   git tag v4.0.18
+#   git push origin v4.0.18
+
+name: Deploy to WordPress.org
+
+on:
+  # Manual trigger (disabled by default - you must click "Run workflow")
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (do not commit to SVN)'
+        required: false
+        default: false
+        type: boolean
+
+  # Trigger on version tags only
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  deploy:
+    name: Deploy to WordPress.org SVN
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from plugin file
+        id: plugin_version
+        run: |
+          VERSION=$(grep -m1 "Version:" seo-wordpress.php | sed 's/.*Version:[[:space:]]*//' | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Plugin version: $VERSION"
+
+      - name: Sync version to readme.txt
+        run: |
+          VERSION="${{ steps.plugin_version.outputs.version }}"
+          # Update "Stable tag:" in readme.txt to match plugin version
+          sed -i "s/^Stable tag:.*/Stable tag: $VERSION/" readme.txt
+          echo "✅ Synced readme.txt Stable tag to: $VERSION"
+
+      - name: Verify tag matches plugin version (on tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          PLUGIN_VERSION="${{ steps.plugin_version.outputs.version }}"
+          
+          if [ "$TAG_VERSION" != "$PLUGIN_VERSION" ]; then
+            echo "❌ Error: Tag version ($TAG_VERSION) does not match plugin version ($PLUGIN_VERSION)"
+            echo "Please update the version in seo-wordpress.php and readme.txt before tagging."
+            exit 1
+          fi
+          
+          echo "✅ Tag version matches plugin version: $PLUGIN_VERSION"
+
+      - name: WordPress Plugin Deploy
+        if: ${{ !inputs.dry_run }}
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        env:
+          SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+          SLUG: seo-wordpress
+          VERSION: ${{ steps.plugin_version.outputs.version }}
+          ASSETS_DIR: assets
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "🔍 Dry run - would deploy version ${{ steps.plugin_version.outputs.version }}"
+          echo ""
+          echo "Files that would be deployed:"
+          find . -type f \
+            ! -path './.git/*' \
+            ! -path './.github/*' \
+            ! -name '.gitignore' \
+            ! -name 'README.md' \
+            ! -name '.DS_Store' \
+            -print
