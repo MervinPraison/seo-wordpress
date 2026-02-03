@@ -1,0 +1,63 @@
+site_name: Praison SEO WordPress
+site_url: https://seo.praison.ai
+site_description: Powerful WordPress SEO Plugin with Meta Optimization, Sitemaps & Breadcrumbs
+
+repo_name: MervinPraison/seo-wordpress
+repo_url: https://github.com/MervinPraison/seo-wordpress
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.details
+  - admonition
+  - tables
+  - attr_list
+  - md_in_html
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Configuration: getting-started/configuration.md
+  - Features:
+    - Meta Optimization: features/meta-optimization.md
+    - XML Sitemap: features/sitemap.md
+    - Breadcrumbs: features/breadcrumbs.md
+    - Analytics: features/analytics.md
+  - Guides:
+    - Best Practices: guides/best-practices.md
+    - Troubleshooting: guides/troubleshooting.md
+  - AGENTS: AGENTS.md
