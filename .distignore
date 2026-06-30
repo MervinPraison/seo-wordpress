@@ -4,10 +4,12 @@
 .env
 .env.example
 
-# Documentation
-TESTING.md
+.github
+.distignore
 ARCHITECTURE.md
 WORDPRESS-ORG-CHECKLIST.md
+*.md
+!readme.txt
 
 # Tests
 tests/

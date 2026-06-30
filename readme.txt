@@ -2,8 +2,8 @@
 Contributors: MervinPraison
 Tags: seo, ai, openai, schema, sitemap
 Requires at least: 5.0
-Tested up to: 6.7
-Stable tag: 5.0.1
+Tested up to: 6.8
+Stable tag: 5.0.7
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -197,6 +197,11 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 
 == Changelog ==
 
+= 5.0.7 =
+* Security: Require authentication and capability checks on all aiseo/v1 REST API routes
+* Security: Prevent unauthenticated access to settings, redirects, analytics, and post modification endpoints
+* Fix: Add per-post and per-term permission checks for object-specific REST routes
+
 = 5.0.1 =
 * Fix: Limit to 5 tags as required by WordPress.org
 
@@ -222,6 +227,9 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 * Previous version (legacy Praison SEO)
 
 == Upgrade Notice ==
+
+= 5.0.7 =
+Important security update. Please update immediately.
 
 = 5.0.0 =
 Major update! Complete rewrite with modern architecture, REST API, WP-CLI support, and many new features.

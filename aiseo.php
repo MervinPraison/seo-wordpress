@@ -3,7 +3,7 @@
  * Plugin Name: AISEO
  * Plugin URI: https://github.com/MervinPraison/WordPressAISEO
  * Description: AI-powered SEO optimization for WordPress. Automatically generate meta descriptions, titles, schema markup, and comprehensive SEO analysis using artificial intelligence.
- * Version: 5.0.1
+ * Version: 5.0.7
  * Author: MervinPraison
  * Author URI: https://mer.vin
  * License: GPL-2.0-or-later
@@ -20,7 +20,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('AISEO_VERSION', '5.0.1');
+define('AISEO_VERSION', '5.0.7');
 
 // CRITICAL FIX: Register AJAX actions IMMEDIATELY, before any hooks
 if (is_admin() && defined('DOING_AJAX') && DOING_AJAX) {
