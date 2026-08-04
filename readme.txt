@@ -164,39 +164,6 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 
 == Changelog ==
 
-= 1.0.0 =
-* Initial release
-* AI-powered meta title and description generation
-* Content analysis engine with 11 SEO metrics
-* Schema markup generator (Article, BlogPosting, WebPage, FAQ, HowTo)
-* Meta tags management and injection
-* Social media optimization (Open Graph, Twitter Cards)
-* XML sitemap generator with smart caching
-* Image SEO and alt text generation
-* Advanced SEO analysis (40+ factors)
-* Bulk editing interface
-* Import/Export functionality (Yoast, Rank Math, AIOSEO)
-* Multilingual SEO support (WPML, Polylang, TranslatePress)
-* Custom post type support
-* Internal linking suggestions
-* Content suggestions and topic ideas
-* 404 monitor and redirection manager
-* Permalink optimization
-* Enhanced readability analysis
-* AI-powered FAQ generator
-* Content outline generator
-* Smart content rewriter
-* Meta description variations
-* Unified reporting system
-* Automated testing system
-* 60+ REST API endpoints
-* 70+ WP-CLI commands
-* Comprehensive caching system
-* Structured logging and monitoring
-* Performance optimizations
-
-== Changelog ==
-
 = 5.0.8 =
 * Security: Remove nonce verification bypass in the AI title and description AJAX handlers; both now enforce check_ajax_referer() and an edit_posts capability check
 * Security: Remove the debug AJAX request logger that wrote nonces, user IDs, and full POST payloads to the error log
@@ -233,6 +200,37 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 
 = 4.0.18 =
 * Previous version (legacy Praison SEO)
+
+= 1.0.0 =
+* Initial release
+* AI-powered meta title and description generation
+* Content analysis engine with 11 SEO metrics
+* Schema markup generator (Article, BlogPosting, WebPage, FAQ, HowTo)
+* Meta tags management and injection
+* Social media optimization (Open Graph, Twitter Cards)
+* XML sitemap generator with smart caching
+* Image SEO and alt text generation
+* Advanced SEO analysis (40+ factors)
+* Bulk editing interface
+* Import/Export functionality (Yoast, Rank Math, AIOSEO)
+* Multilingual SEO support (WPML, Polylang, TranslatePress)
+* Custom post type support
+* Internal linking suggestions
+* Content suggestions and topic ideas
+* 404 monitor and redirection manager
+* Permalink optimization
+* Enhanced readability analysis
+* AI-powered FAQ generator
+* Content outline generator
+* Smart content rewriter
+* Meta description variations
+* Unified reporting system
+* Automated testing system
+* 60+ REST API endpoints
+* 70+ WP-CLI commands
+* Comprehensive caching system
+* Structured logging and monitoring
+* Performance optimizations
 
 == Upgrade Notice ==
 
