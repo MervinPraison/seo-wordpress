@@ -107,6 +107,46 @@ function handler() {
 
 Localise nonce in enqueued scripts via `wp_localize_script`.
 
+### Nonce actions in use
+
+| Nonce action | Issued by | Consumed by |
+|--------------|-----------|-------------|
+| `aiseo_admin_nonce` | `wp_localize_script` (`aiseoAdmin.nonce`, `aiseoSEOImprover`, `aiseGutenbergData`) | all `AISEO_Admin` AJAX handlers |
+| `aiseo_metabox_nonce` | `wp_nonce_field()` in the post editor metabox | `AISEO_Metabox` `aiseo_metabox_*` handlers + `save_post` |
+| `aiseo_image_seo` | `wp_localize_script` in `AISEO_Image_SEO` | image SEO handlers |
+
+One handler must accept exactly one nonce action. If a handler needs to serve two entry
+points, that is a signal the action names should be split instead.
+
+### Anti-patterns that have shipped here
+
+```php
+// 1. Registered as a filter, but check_ajax_referer is an ACTION -> return value ignored.
+add_filter('check_ajax_referer', [$this, 'bypass_nonce_check'], 10, 2);
+
+// 2. Verifies, logs, then proceeds anyway -> CSRF hole.
+$ok = wp_verify_nonce($_POST['nonce'], 'aiseo_admin_nonce');
+error_log('Nonce result: ' . var_export($ok, true));
+// "TEMPORARY: skip nonce check" ... continues regardless
+
+// 3. Logs secrets.
+error_log('Nonce in POST: ' . $_POST['nonce']);
+console.log('Nonce being sent:', aiseoAdmin.nonce);
+```
+
+Correct form:
+
+```php
+check_ajax_referer('aiseo_admin_nonce', 'nonce');   // dies with -1 + HTTP 403
+if (!current_user_can('edit_posts')) {
+    wp_send_json_error('Permission denied');
+    return;
+}
+```
+
+Endpoints that cannot verify a nonce (e.g. a nonce-refresh endpoint) must still gate on the
+capability every consumer requires — `is_user_logged_in()` alone lets a subscriber mint one.
+
 ---
 
 ## Pre-submission security checklist
