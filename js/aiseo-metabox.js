@@ -70,7 +70,7 @@
                 url: ajaxurl,
                 type: 'POST',
                 data: {
-                    action: 'aiseo_generate_' + field,
+                    action: 'aiseo_metabox_generate_' + field,
                     post_id: postId,
                     nonce: $('#aiseo_metabox_nonce').val()
                 },
@@ -111,7 +111,7 @@
                 url: ajaxurl,
                 type: 'POST',
                 data: {
-                    action: 'aiseo_analyze_content',
+                    action: 'aiseo_metabox_analyze_content',
                     post_id: postId,
                     nonce: $('#aiseo_metabox_nonce').val()
                 },

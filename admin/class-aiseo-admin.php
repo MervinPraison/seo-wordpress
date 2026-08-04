@@ -29,16 +29,9 @@ class AISEO_Admin {
      * Constructor
      */
     public function __construct() {
-        error_log('🟢 AISEO_Admin class constructor called');
         $this->define_tabs();
         $this->active_tab = $this->get_active_tab();
-        
-        // GLOBAL AJAX LOGGER - Logs ALL AISEO AJAX requests
-        add_action('admin_init', array($this, 'log_all_ajax_requests'), 1);
-        
-        // TEMPORARY: Bypass nonce verification for ALL AISEO actions
-        add_filter('check_ajax_referer', array($this, 'bypass_aiseo_nonce_check'), 10, 2);
-        
+
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
         add_action('enqueue_block_editor_assets', array($this, 'enqueue_gutenberg_assets'));
@@ -49,8 +42,6 @@ class AISEO_Admin {
         add_action('wp_ajax_aiseo_generate_title', array($this, 'ajax_generate_title'));
         add_action('wp_ajax_aiseo_generate_description', array($this, 'ajax_generate_description'));
         add_action('wp_ajax_aiseo_generate_keyword', array($this, 'ajax_generate_keyword'));
-        
-        error_log('🟢 Registered AJAX action: wp_ajax_aiseo_generate_title');
         add_action('wp_ajax_aiseo_analyze_content', array($this, 'ajax_analyze_post'));
         
         // Technical SEO handlers
@@ -94,60 +85,17 @@ class AISEO_Admin {
     }
     
     /**
-     * TEMPORARY: Bypass nonce check for AISEO actions
-     * This allows AJAX to work despite session/nonce mismatch
-     */
-    public function bypass_aiseo_nonce_check($result, $action) {
-        // Only bypass for AISEO actions
-        if ($action === 'aiseo_admin_nonce') {
-            error_log('⚠️  BYPASSING NONCE CHECK FOR AISEO - SECURITY RISK!');
-            return true; // Always pass nonce check
-        }
-        return $result;
-    }
-    
-    /**
-     * GLOBAL AJAX LOGGER - Logs ALL AISEO AJAX requests
-     * This runs BEFORE WordPress processes the AJAX action
-     */
-    public function log_all_ajax_requests() {
-        // Only log if this is an AJAX request
-        if (!defined('DOING_AJAX') || !DOING_AJAX) {
-            return;
-        }
-        
-        // Only log AISEO actions
-        $action = isset($_POST['action']) ? $_POST['action'] : (isset($_GET['action']) ? $_GET['action'] : '');
-        if (strpos($action, 'aiseo_') !== 0) {
-            return;
-        }
-        
-        error_log('========================================');
-        error_log('🔵 GLOBAL AJAX LOGGER - AISEO REQUEST DETECTED');
-        error_log('========================================');
-        error_log('Action: ' . $action);
-        error_log('Request Method: ' . $_SERVER['REQUEST_METHOD']);
-        error_log('Request Time: ' . date('Y-m-d H:i:s'));
-        error_log('User ID: ' . get_current_user_id());
-        error_log('User logged in: ' . (is_user_logged_in() ? 'YES' : 'NO'));
-        error_log('User can edit_posts: ' . (current_user_can('edit_posts') ? 'YES' : 'NO'));
-        error_log('Nonce in POST: ' . (isset($_POST['nonce']) ? $_POST['nonce'] : 'NONE'));
-        error_log('Nonce in GET: ' . (isset($_GET['nonce']) ? $_GET['nonce'] : 'NONE'));
-        error_log('Referer: ' . (isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'NONE'));
-        error_log('POST keys: ' . implode(', ', array_keys($_POST)));
-        error_log('========================================');
-    }
-    
-    /**
      * AJAX: Refresh nonce
      * Returns a fresh nonce without requiring nonce verification
      */
     public function ajax_refresh_nonce() {
-        if (!is_user_logged_in()) {
-            wp_send_json_error('Not logged in');
+        // No nonce check is possible here (this endpoint issues the nonce), so
+        // gate it on the same capability every AISEO AJAX handler requires.
+        if (!is_user_logged_in() || !current_user_can('edit_posts')) {
+            wp_send_json_error('Permission denied');
             return;
         }
-        
+
         $new_nonce = wp_create_nonce('aiseo_admin_nonce');
         wp_send_json_success(array('nonce' => $new_nonce));
     }
@@ -688,52 +636,13 @@ class AISEO_Admin {
      * AJAX: Generate title for SEO Tools tab
      */
     public function ajax_generate_title() {
-        error_log('!!! FUNCTION CALLED: ajax_generate_title !!!');
-        error_log('!!! FILE: ' . __FILE__ . ' LINE: ' . __LINE__);
-        
-        // Start output buffering to catch any early output
-        ob_start();
-        
-        // DEBUG: Log all request data
-        error_log('=== AISEO GENERATE TITLE DEBUG ===');
-        error_log('POST data: ' . print_r($_POST, true));
-        error_log('Nonce received: ' . (isset($_POST['nonce']) ? $_POST['nonce'] : 'NONE'));
-        error_log('Action: ' . (isset($_POST['action']) ? $_POST['action'] : 'NONE'));
-        error_log('User ID: ' . get_current_user_id());
-        error_log('User logged in: ' . (is_user_logged_in() ? 'YES' : 'NO'));
-        error_log('User can edit_posts: ' . (current_user_can('edit_posts') ? 'YES' : 'NO'));
-        error_log('Current URL: ' . (isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'NONE'));
-        error_log('Request method: ' . $_SERVER['REQUEST_METHOD']);
-        
-        // Verify nonce manually to get better error info
-        if (!isset($_POST['nonce'])) {
-            error_log('ERROR: No nonce provided in request');
-            ob_end_clean();
-            wp_send_json_error('Security check failed: No nonce provided');
-            return;
-        }
-        
-        $nonce = $_POST['nonce'];
-        $nonce_check = wp_verify_nonce($nonce, 'aiseo_admin_nonce');
-        error_log('Nonce value: ' . $nonce);
-        error_log('wp_verify_nonce result: ' . var_export($nonce_check, true));
-        error_log('Nonce age: ' . ($nonce_check === 1 ? 'Fresh (0-12 hours)' : ($nonce_check === 2 ? 'Old (12-24 hours)' : 'Invalid/Expired')));
-        
-        // TEMPORARY: Skip nonce check for debugging - ALWAYS BYPASS FOR NOW
-        error_log('⚠️  BYPASSING NONCE CHECK FOR DEBUGGING - SECURITY RISK!');
-        error_log('Nonce check result was: ' . var_export($nonce_check, true));
-        // Continue regardless of nonce check result
-        
+        check_ajax_referer('aiseo_admin_nonce', 'nonce');
+
         if (!current_user_can('edit_posts')) {
-            error_log('ERROR: User does not have edit_posts capability');
-            ob_end_clean();
-            wp_send_json_error('Permission denied: You need edit_posts capability');
+            wp_send_json_error('Permission denied');
             return;
         }
-        
-        error_log('SUCCESS: Proceeding with title generation');
-        ob_end_clean();
-        
+
         $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
         
         if (!$post_id) {
@@ -772,37 +681,13 @@ class AISEO_Admin {
      * AJAX: Generate description for SEO Tools tab
      */
     public function ajax_generate_description() {
-        // DEBUG: Log all request data
-        error_log('=== AISEO GENERATE DESCRIPTION DEBUG ===');
-        error_log('POST data: ' . print_r($_POST, true));
-        error_log('Nonce received: ' . (isset($_POST['nonce']) ? $_POST['nonce'] : 'NONE'));
-        error_log('User ID: ' . get_current_user_id());
-        error_log('User logged in: ' . (is_user_logged_in() ? 'YES' : 'NO'));
-        
-        // Verify nonce manually
-        if (!isset($_POST['nonce'])) {
-            error_log('ERROR: No nonce provided');
-            wp_send_json_error('Security check failed: No nonce provided');
-            return;
-        }
-        
-        $nonce = $_POST['nonce'];
-        $nonce_check = wp_verify_nonce($nonce, 'aiseo_admin_nonce');
-        error_log('wp_verify_nonce result: ' . var_export($nonce_check, true));
-        
-        // TEMPORARY: Skip nonce check for debugging - ALWAYS BYPASS FOR NOW
-        error_log('⚠️  BYPASSING NONCE CHECK FOR DEBUGGING - SECURITY RISK!');
-        error_log('Nonce check result was: ' . var_export($nonce_check, true));
-        // Continue regardless of nonce check result
-        
+        check_ajax_referer('aiseo_admin_nonce', 'nonce');
+
         if (!current_user_can('edit_posts')) {
-            error_log('ERROR: User does not have edit_posts capability');
-            wp_send_json_error('Permission denied: You need edit_posts capability');
+            wp_send_json_error('Permission denied');
             return;
         }
-        
-        error_log('SUCCESS: All security checks passed');
-        
+
         $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
         
         if (!$post_id) {
