@@ -8,11 +8,9 @@
     
     // Wait for DOM ready
     $(document).ready(function() {
-        console.log('AISEO Metabox: Script loaded');
         
         // Check if we're on the post editor
         if (!$('.aiseo-metabox').length) {
-            console.log('AISEO Metabox: Not on post editor page');
             return;
         }
         
@@ -188,7 +186,6 @@
             }, 500);
         });
         
-        console.log('AISEO Metabox: All event handlers initialized');
     });
     
 })(jQuery);

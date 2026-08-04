@@ -447,7 +447,6 @@ jQuery(document).ready(function($) {
                 nonce: aiseoAdmin.nonce
             },
             success: function(response) {
-                console.log('Internal Linking Response:', response);
                 if (response.success && response.data) {
                     var html = '<ul>';
                     var suggestions = [];
@@ -508,7 +507,6 @@ jQuery(document).ready(function($) {
                 nonce: aiseoAdmin.nonce
             },
             success: function(response) {
-                console.log('Title Variations Response:', response);
                 if (response.success && response.data) {
                     if (Array.isArray(response.data) && response.data.length > 0) {
                         var html = '<ol>';
@@ -568,7 +566,6 @@ jQuery(document).ready(function($) {
                 nonce: aiseoAdmin.nonce
             },
             success: function(response) {
-                console.log('Description Variations Response:', response);
                 if (response.success && response.data) {
                     if (Array.isArray(response.data) && response.data.length > 0) {
                         var html = '<ol>';

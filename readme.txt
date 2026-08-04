@@ -3,7 +3,7 @@ Contributors: MervinPraison
 Tags: seo, ai, openai, schema, sitemap
 Requires at least: 5.0
 Tested up to: 6.9
-Stable tag: 5.0.8
+Stable tag: 5.0.9
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -164,6 +164,10 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 
 == Changelog ==
 
+= 5.0.9 =
+* Remove the global browser-console AJAX interceptor that logged every AISEO request's payload and nonce to devtools
+* Remove remaining leftover debug console.log statements from the admin screens, metabox, and image SEO scripts
+
 = 5.0.8 =
 * Security: Remove nonce verification bypass in the AI title and description AJAX handlers; both now enforce check_ajax_referer() and an edit_posts capability check
 * Security: Remove the debug AJAX request logger that wrote nonces, user IDs, and full POST payloads to the error log
@@ -233,6 +237,9 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 * Performance optimizations
 
 == Upgrade Notice ==
+
+= 5.0.9 =
+Removes leftover debug logging that exposed AJAX payloads and nonces in the browser console on wp-admin pages.
 
 = 5.0.8 =
 Important security update. Removes a nonce verification bypass in the AI generation AJAX handlers and stops debug data being written to the error log. Please update immediately.
