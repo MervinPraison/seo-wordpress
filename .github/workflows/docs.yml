@@ -1,5 +1,3 @@
-# MkDocs Documentation Build and Deploy
-
 name: Docs
 
 on:
@@ -7,7 +5,7 @@ on:
     branches: [master]
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
+      - 'aiui.yaml'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -25,19 +23,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
-      - name: Install dependencies
-        run: |
-          pip install mkdocs mkdocs-material pymdown-extensions
-      
+
+      - name: Install PraisonAI UI
+        run: pip install aiui
+
       - name: Build docs
-        run: mkdocs build
-      
+        run: |
+          aiui build --config aiui.yaml --output site --minify
+          if [ -f docs/CNAME ]; then cp docs/CNAME site/CNAME; fi
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
