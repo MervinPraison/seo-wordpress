@@ -53,9 +53,9 @@ class AISEO_Backlink {
             'last_checked' => current_time('mysql'),
             'status' => 'active', // active, lost, broken
             'follow' => isset($options['follow']) ? (bool) $options['follow'] : true,
-            'domain_authority' => 0,
-            'page_authority' => 0,
-            'spam_score' => 0,
+            'domain_authority' => null,
+            'page_authority' => null,
+            'spam_score' => null,
             'notes' => isset($options['notes']) ? sanitize_textarea_field($options['notes']) : ''
         ];
         
@@ -147,7 +147,7 @@ class AISEO_Backlink {
         // Fetch source page
         $response = wp_remote_get($backlink['source_url'], [
             'timeout' => 15,
-            'sslverify' => false,
+            'sslverify' => true,
             'user-agent' => 'AISEO Backlink Checker/1.0'
         ]);
         

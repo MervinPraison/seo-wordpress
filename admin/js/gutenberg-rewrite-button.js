@@ -1,193 +1,125 @@
 /**
- * AISEO Gutenberg Rewrite Button
- * Adds a rewrite button with dropdown options to all blocks
+ * Block toolbar dropdown for rewriting selected text blocks.
+ *
+ * @package AISEO
  */
+(function (wp, $) {
+    'use strict';
 
-(function (wp) {
-    const { registerPlugin } = wp.plugins;
-    const { PluginBlockSettingsMenuItem } = wp.editPost;
-    const { Fragment } = wp.element;
-    const { BlockControls } = wp.blockEditor;
-    const { ToolbarGroup, ToolbarDropdownMenu, Spinner } = wp.components;
-    const { createHigherOrderComponent } = wp.compose;
-    const { addFilter } = wp.hooks;
-    const { select, dispatch } = wp.data;
-    const { __ } = wp.i18n;
+    if (!wp || !wp.hooks || !wp.compose || !wp.element || !wp.components || !wp.data || !wp.i18n) {
+        return;
+    }
 
-    // Rewrite modes with icons (minimal changes)
-    const rewriteModes = [
-        {
-            title: __('Fix Grammar', 'aiseo'),
-            icon: 'yes',
-            mode: 'grammar',
-            description: 'Fix grammar and spelling only'
-        },
-        {
-            title: __('Improve Clarity', 'aiseo'),
-            icon: 'visibility',
-            mode: 'clarity',
-            description: 'Make it clearer without major changes'
-        },
-        {
-            title: __('Shorten', 'aiseo'),
-            icon: 'editor-contract',
-            mode: 'concise',
-            description: 'Remove unnecessary words'
-        },
-        {
-            title: __('Professional Tone', 'aiseo'),
-            icon: 'businessman',
-            mode: 'professional',
-            description: 'Adjust tone to be more professional'
-        },
-        {
-            title: __('Casual Tone', 'aiseo'),
-            icon: 'smiley',
-            mode: 'casual',
-            description: 'Adjust tone to be more casual'
-        },
-        {
-            title: __('Simplify', 'aiseo'),
-            icon: 'lightbulb',
-            mode: 'simplify',
-            description: 'Use simpler words'
-        }
+    var addFilter = wp.hooks.addFilter;
+    var createHigherOrderComponent = wp.compose.createHigherOrderComponent;
+    var el = wp.element.createElement;
+    var Fragment = wp.element.Fragment;
+    var BlockControls = wp.blockEditor && wp.blockEditor.BlockControls;
+    var ToolbarGroup = wp.components.ToolbarGroup;
+    var ToolbarDropdownMenu = wp.components.ToolbarDropdownMenu;
+    var select = wp.data.select;
+    var dispatch = wp.data.dispatch;
+    var __ = wp.i18n.__;
+
+    if (!BlockControls || typeof aiseoGutenbergData === 'undefined') {
+        return;
+    }
+
+    var rewriteModes = [
+        { title: __('Fix grammar', 'aiseo'), icon: 'yes', mode: 'grammar' },
+        { title: __('Improve clarity', 'aiseo'), icon: 'visibility', mode: 'clarity' },
+        { title: __('Shorten', 'aiseo'), icon: 'editor-contract', mode: 'concise' },
+        { title: __('Professional tone', 'aiseo'), icon: 'businessman', mode: 'professional' },
+        { title: __('Casual tone', 'aiseo'), icon: 'smiley', mode: 'casual' },
+        { title: __('Simplify', 'aiseo'), icon: 'lightbulb', mode: 'simplify' }
     ];
 
-    // State to track rewriting blocks
-    const rewritingBlocks = new Set();
+    var supportedBlocks = [
+        'core/paragraph',
+        'core/heading',
+        'core/list',
+        'core/quote',
+        'core/verse',
+        'core/code'
+    ];
 
-    /**
-     * Rewrite block content
-     */
     function rewriteBlockContent(clientId, mode) {
-        const block = select('core/block-editor').getBlock(clientId);
-        
+        var block = select('core/block-editor').getBlock(clientId);
         if (!block) {
-            console.error('Block not found');
             return;
         }
-
-        // Get text content from block
-        let content = '';
-        if (block.attributes.content) {
-            content = block.attributes.content;
-        } else if (block.attributes.text) {
-            content = block.attributes.text;
-        } else if (block.attributes.value) {
-            content = block.attributes.value;
+        var content = block.attributes.content || block.attributes.text || block.attributes.value || '';
+        var textContent = '';
+        if (window.DOMParser) {
+            var parsed = new DOMParser().parseFromString(String(content), 'text/html');
+            textContent = ((parsed.body && parsed.body.textContent) || '').trim();
         } else {
-            content = block.innerBlocks.map(b => b.attributes.content || '').join(' ');
+            textContent = String(content).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
         }
-
-        // Strip HTML tags
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = content;
-        const textContent = tempDiv.textContent || tempDiv.innerText || '';
-
-        if (!textContent.trim()) {
-            alert(__('No content to rewrite in this block', 'aiseo'));
+        if (!textContent) {
+            window.alert(__('This block has no text to rewrite.', 'aiseo'));
             return;
         }
-
-        // Mark block as rewriting
-        rewritingBlocks.add(clientId);
-
-        // Show loading state
-        const originalContent = content;
+        var originalContent = content;
         dispatch('core/block-editor').updateBlockAttributes(clientId, {
-            content: '<p><em>Rewriting content...</em></p>'
+            content: '<em>' + __('Rewriting…', 'aiseo') + '</em>'
         });
-
-        // Call AJAX to rewrite
-        jQuery.ajax({
-            url: ajaxurl,
+        $.ajax({
+            url: aiseoGutenbergData.ajaxUrl || window.ajaxurl,
             type: 'POST',
             data: {
                 action: 'aiseo_rewrite_content',
-                nonce: aiseGutenbergData.nonce,
+                nonce: aiseoGutenbergData.nonce,
                 content: textContent,
                 mode: mode,
-                minimal: true,  // Flag for minimal changes
-                preserve_meaning: true  // Keep original meaning
+                minimal: true,
+                preserve_meaning: true
             },
             success: function (response) {
-                rewritingBlocks.delete(clientId);
-                
-                if (response.success && response.data) {
-                    // Update block with rewritten content
-                    dispatch('core/block-editor').updateBlockAttributes(clientId, {
-                        content: response.data
-                    });
+                if (response && response.success && response.data) {
+                    dispatch('core/block-editor').updateBlockAttributes(clientId, { content: response.data });
                 } else {
-                    // Restore original content on error
-                    dispatch('core/block-editor').updateBlockAttributes(clientId, {
-                        content: originalContent
-                    });
-                    alert(__('Error: ', 'aiseo') + (response.data || 'Failed to rewrite content'));
+                    dispatch('core/block-editor').updateBlockAttributes(clientId, { content: originalContent });
+                    window.alert(__('Could not rewrite this block.', 'aiseo'));
                 }
             },
-            error: function (xhr, status, error) {
-                rewritingBlocks.delete(clientId);
-                
-                // Restore original content
-                dispatch('core/block-editor').updateBlockAttributes(clientId, {
-                    content: originalContent
-                });
-                
-                console.error('Rewrite error:', error);
-                alert(__('Connection error. Please try again.', 'aiseo'));
+            error: function () {
+                dispatch('core/block-editor').updateBlockAttributes(clientId, { content: originalContent });
+                window.alert(__('Connection error. Please try again.', 'aiseo'));
             }
         });
     }
 
-    /**
-     * Add rewrite button to block toolbar
-     */
-    const withRewriteButton = createHigherOrderComponent((BlockEdit) => {
-        return (props) => {
-            const { name, clientId, isSelected } = props;
-
-            // Only show for text-based blocks
-            const supportedBlocks = [
-                'core/paragraph',
-                'core/heading',
-                'core/list',
-                'core/quote',
-                'core/verse',
-                'core/code'
-            ];
-
-            const showButton = isSelected && supportedBlocks.includes(name);
-
-            return (
-                <Fragment>
-                    <BlockEdit {...props} />
-                    {showButton && (
-                        <BlockControls group="block">
-                            <ToolbarGroup>
-                                <ToolbarDropdownMenu
-                                    icon="edit"
-                                    label={__('AI Rewrite', 'aiseo')}
-                                    controls={rewriteModes.map(mode => ({
-                                        title: mode.title,
-                                        icon: mode.icon,
-                                        onClick: () => rewriteBlockContent(clientId, mode.mode)
-                                    }))}
-                                />
-                            </ToolbarGroup>
-                        </BlockControls>
-                    )}
-                </Fragment>
+    var withRewriteButton = createHigherOrderComponent(function (BlockEdit) {
+        return function (props) {
+            var showButton = props.isSelected && supportedBlocks.indexOf(props.name) !== -1;
+            var controls = rewriteModes.map(function (mode) {
+                return {
+                    title: mode.title,
+                    icon: mode.icon,
+                    onClick: function () {
+                        rewriteBlockContent(props.clientId, mode.mode);
+                    }
+                };
+            });
+            return el(
+                Fragment,
+                null,
+                el(BlockEdit, props),
+                showButton ? el(
+                    BlockControls,
+                    { group: 'block' },
+                    el(ToolbarGroup, null,
+                        el(ToolbarDropdownMenu, {
+                            icon: 'edit',
+                            label: __('AI rewrite', 'aiseo'),
+                            controls: controls
+                        })
+                    )
+                ) : null
             );
         };
     }, 'withRewriteButton');
 
-    // Register the filter
-    addFilter(
-        'editor.BlockEdit',
-        'aiseo/rewrite-button',
-        withRewriteButton
-    );
-
-})(window.wp);
+    addFilter('editor.BlockEdit', 'aiseo/rewrite-button', withRewriteButton);
+})(window.wp, window.jQuery);

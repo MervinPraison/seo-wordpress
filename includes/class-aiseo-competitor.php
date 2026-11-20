@@ -421,7 +421,7 @@ class AISEO_Competitor {
      */
     private function extract_h1_from_content($content) {
         preg_match_all('/<h1[^>]*>(.*?)<\/h1>/i', $content, $matches);
-        return array_map('strip_tags', $matches[1] ?? []);
+        return array_map('wp_strip_all_tags', $matches[1] ?? []);
     }
     
     /**
@@ -432,7 +432,7 @@ class AISEO_Competitor {
      */
     private function extract_h2_from_content($content) {
         preg_match_all('/<h2[^>]*>(.*?)<\/h2>/i', $content, $matches);
-        return array_map('strip_tags', array_slice($matches[1] ?? [], 0, 10));
+        return array_map('wp_strip_all_tags', array_slice($matches[1] ?? [], 0, 10));
     }
     
     /**

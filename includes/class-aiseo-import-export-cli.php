@@ -341,6 +341,61 @@ class AISEO_Import_Export_CLI {
             $result['skipped']
         ));
     }
+
+    /**
+     * Import from SEOPress
+     *
+     * ## OPTIONS
+     *
+     * [--post-type=<type>]
+     * : Post type to import
+     * ---
+     * default: post
+     * ---
+     *
+     * [--limit=<number>]
+     * : Limit number of posts
+     * ---
+     * default: -1
+     * ---
+     *
+     * [--overwrite]
+     * : Overwrite existing AISEO metadata
+     *
+     * ## EXAMPLES
+     *
+     *     wp aiseo import seopress
+     *
+     * @param array $args Positional arguments
+     * @param array $assoc_args Associative arguments
+     */
+    public function seopress($args, $assoc_args) {
+        $post_type = isset($assoc_args['post-type']) ? $assoc_args['post-type'] : 'post';
+        $limit = isset($assoc_args['limit']) ? absint($assoc_args['limit']) : -1;
+        $overwrite = isset($assoc_args['overwrite']);
+
+        WP_CLI::log('Importing from SEOPress...');
+        WP_CLI::log(sprintf('Post type: %s', $post_type));
+        WP_CLI::log(sprintf('Overwrite: %s', $overwrite ? 'Yes' : 'No'));
+        WP_CLI::log('');
+
+        $import_export = new AISEO_Import_Export();
+        $result = $import_export->import_from_seopress([
+            'post_type' => $post_type,
+            'limit' => $limit,
+            'overwrite' => $overwrite
+        ]);
+
+        if (is_wp_error($result)) {
+            WP_CLI::error($result->get_error_message());
+        }
+
+        WP_CLI::success(sprintf(
+            'SEOPress import complete. Success: %d, Skipped: %d',
+            $result['success'],
+            $result['skipped']
+        ));
+    }
 }
 
 // Register WP-CLI commands
@@ -349,3 +404,4 @@ WP_CLI::add_command('aiseo import json', ['AISEO_Import_Export_CLI', 'import_jso
 WP_CLI::add_command('aiseo import yoast', ['AISEO_Import_Export_CLI', 'yoast']);
 WP_CLI::add_command('aiseo import rankmath', ['AISEO_Import_Export_CLI', 'rankmath']);
 WP_CLI::add_command('aiseo import aioseo', ['AISEO_Import_Export_CLI', 'aioseo']);
+WP_CLI::add_command('aiseo import seopress', ['AISEO_Import_Export_CLI', 'seopress']);

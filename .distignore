@@ -1,11 +1,19 @@
 # Development files
 .git
 .gitignore
+.gitattributes
 .env
 .env.example
+.distignore
+.release.sh
+release.sh
+phpcs.xml
+phpunit.xml
+mkdocs.yml
+docs/
+AGENTS.md
 
 .github
-.distignore
 ARCHITECTURE.md
 WORDPRESS-ORG-CHECKLIST.md
 *.md
@@ -14,6 +22,7 @@ WORDPRESS-ORG-CHECKLIST.md
 # Tests
 tests/
 test-results-*.log
+languages/.gitkeep
 
 # Build files
 node_modules/
@@ -26,6 +35,10 @@ package-lock.json
 # IDE files
 .vscode/
 .idea/
+.cursor/
+.claude/
+add-logging.js
+api-index.jsonl
 *.swp
 *.swo
 *~

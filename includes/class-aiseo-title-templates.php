@@ -30,11 +30,18 @@ class AISEO_Title_Templates {
         'page_title' => '%title% %sep% %sitename%',
         'category_title' => '%term% %sep% %sitename%',
         'tag_title' => '%term% %sep% %sitename%',
+        'taxonomy_title' => '%term% %sep% %sitename%',
         'archive_title' => '%archive_type% %sep% %sitename%',
         'author_title' => '%author% %sep% %sitename%',
         'search_title' => 'Search Results for "%search%" %sep% %sitename%',
         '404_title' => 'Page Not Found %sep% %sitename%',
         'date_title' => '%date% %sep% %sitename%',
+        'post_description' => '%excerpt%',
+        'page_description' => '%excerpt%',
+        'category_description' => '%term_description%',
+        'tag_description' => '%term_description%',
+        'taxonomy_description' => '%term_description%',
+        'author_description' => '%author_bio%',
     );
     
     /**
@@ -51,6 +58,10 @@ class AISEO_Title_Templates {
         '%date%' => 'Archive date',
         '%archive_type%' => 'Archive type (e.g., "Archives")',
         '%page%' => 'Page number',
+        '%excerpt%' => 'Post excerpt or trimmed content',
+        '%content%' => 'Trimmed post content',
+        '%term_description%' => 'Category or tag description',
+        '%author_bio%' => 'Author biographical info',
     );
     
     /**
@@ -112,12 +123,97 @@ class AISEO_Title_Templates {
     }
     
     /**
+     * Title format for a post or page, used for meta and Open Graph fallbacks.
+     *
+     * @param WP_Post $post Post.
+     * @return string
+     */
+    public function format_post_title($post) {
+        if (!$post instanceof WP_Post) {
+            return '';
+        }
+        $templates = $this->get_templates();
+        $key = ($post->post_type === 'page') ? 'page_title' : 'post_title';
+        return $this->parse_template($templates[$key], array('title' => $post->post_title), $templates);
+    }
+
+    /**
+     * Description format for a post or page.
+     *
+     * @param WP_Post $post Post.
+     * @return string
+     */
+    public function format_post_description($post) {
+        if (!$post instanceof WP_Post) {
+            return '';
+        }
+        $templates = $this->get_templates();
+        $key = ($post->post_type === 'page') ? 'page_description' : 'post_description';
+        $excerpt = (is_string($post->post_excerpt) && $post->post_excerpt !== '') ? $post->post_excerpt : wp_strip_all_tags((string) $post->post_content);
+        $parsed = $this->parse_template(
+            $templates[$key],
+            array('title' => $post->post_title),
+            $templates,
+            array(
+                '%excerpt%' => AISEO_Helpers::truncate_text($excerpt, 160),
+                '%content%' => AISEO_Helpers::truncate_text(wp_strip_all_tags((string) $post->post_content), 160),
+            )
+        );
+        return AISEO_Helpers::truncate_text($parsed, 160);
+    }
+
+    /**
+     * Description format for a category, tag or custom taxonomy archive.
+     *
+     * @param WP_Term $term Term.
+     * @return string
+     */
+    public function format_term_description($term) {
+        if (!$term instanceof WP_Term) {
+            return '';
+        }
+        $templates = $this->get_templates();
+        if ($term->taxonomy === 'category') {
+            $key = 'category_description';
+        } elseif ($term->taxonomy === 'post_tag') {
+            $key = 'tag_description';
+        } else {
+            $key = 'taxonomy_description';
+        }
+        $term_desc = is_string($term->description) ? wp_strip_all_tags($term->description) : '';
+        $parsed = $this->parse_template(
+            $templates[$key],
+            array('title' => $term->name),
+            $templates,
+            array(
+                '%term%' => $term->name,
+                '%term_description%' => AISEO_Helpers::truncate_text($term_desc, 160),
+            )
+        );
+        $parsed = AISEO_Helpers::truncate_text($parsed, 160);
+        if ($parsed === '') {
+            $parsed = AISEO_Helpers::truncate_text($term_desc !== '' ? $term_desc : $term->name, 160);
+        }
+        return $parsed;
+    }
+
+    /**
      * Filter document title parts
      *
      * @param array $title_parts Title parts
      * @return array Modified title parts
      */
     public function filter_title_parts($title_parts) {
+        if (is_author()) {
+            $author = get_queried_object();
+            if ($author instanceof WP_User) {
+                $custom = get_user_meta($author->ID, '_aiseo_title', true);
+                if (is_string($custom) && $custom !== '') {
+                    return array('title' => $custom);
+                }
+            }
+        }
+
         $templates = $this->get_templates();
         
         // Determine page type and get appropriate template
@@ -160,6 +256,10 @@ class AISEO_Title_Templates {
         if (is_tag()) {
             return $templates['tag_title'];
         }
+
+        if (is_tax()) {
+            return $templates['taxonomy_title'];
+        }
         
         if (is_author()) {
             return $templates['author_title'];
@@ -190,14 +290,18 @@ class AISEO_Title_Templates {
      * @param string $template Template string
      * @param array $title_parts Original title parts
      * @param array $templates All templates
+     * @param array $extra Extra placeholder replacements.
      * @return string Parsed title
      */
-    private function parse_template($template, $title_parts, $templates) {
+    private function parse_template($template, $title_parts, $templates, $extra = array()) {
         $replacements = array(
             '%sitename%' => get_bloginfo('name'),
             '%tagline%' => get_bloginfo('description'),
             '%sep%' => $templates['separator'],
         );
+        if (is_array($extra)) {
+            $replacements = array_merge($replacements, $extra);
+        }
         
         // Get title based on context
         if (isset($title_parts['title'])) {
@@ -225,14 +329,17 @@ class AISEO_Title_Templates {
             $replacements['%search%'] = get_search_query();
         }
         
-        // Date archives
+        // Date archives. The main loop has not started when the title is built.
         if (is_date()) {
-            if (is_year()) {
-                $replacements['%date%'] = get_the_date('Y');
-            } elseif (is_month()) {
-                $replacements['%date%'] = get_the_date('F Y');
-            } elseif (is_day()) {
-                $replacements['%date%'] = get_the_date();
+            $year = (int) get_query_var('year');
+            $month = (int) get_query_var('monthnum');
+            $day = (int) get_query_var('day');
+            if (is_day() && $year && $month && $day) {
+                $replacements['%date%'] = date_i18n(get_option('date_format'), mktime(0, 0, 0, $month, $day, $year));
+            } elseif (is_month() && $year && $month) {
+                $replacements['%date%'] = date_i18n('F Y', mktime(0, 0, 0, $month, 1, $year));
+            } elseif ($year) {
+                $replacements['%date%'] = (string) $year;
             }
         }
         
@@ -242,8 +349,9 @@ class AISEO_Title_Templates {
         }
         
         // Page number
-        $page = get_query_var('paged', 0);
+        $page = max((int) get_query_var('paged'), (int) get_query_var('page'));
         if ($page > 1) {
+            /* translators: %d: number. */
             $replacements['%page%'] = sprintf(__('Page %d', 'aiseo'), $page);
         } else {
             $replacements['%page%'] = '';
@@ -255,6 +363,9 @@ class AISEO_Title_Templates {
             array_values($replacements),
             $template
         );
+        if ($page > 1 && strpos($template, '%page%') === false && $replacements['%page%'] !== '') {
+            $title .= ' ' . $templates['separator'] . ' ' . $replacements['%page%'];
+        }
         
         // Clean up multiple separators and spaces
         $sep = preg_quote($templates['separator'], '/');

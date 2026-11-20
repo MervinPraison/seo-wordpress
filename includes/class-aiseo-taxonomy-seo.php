@@ -41,6 +41,7 @@ class AISEO_Taxonomy_SEO {
         
         // Hook into wp_head for taxonomy meta tags
         add_action('wp_head', array($this, 'output_taxonomy_meta'), 1);
+        add_filter('wp_robots', array($this, 'filter_term_robots'), 30);
         
         // Filter document title for taxonomies
         add_filter('pre_get_document_title', array($this, 'filter_taxonomy_title'), 5);
@@ -61,6 +62,80 @@ class AISEO_Taxonomy_SEO {
             add_action("edited_{$taxonomy}", array($this, 'save_term_meta'), 10, 2);
             add_action("created_{$taxonomy}", array($this, 'save_term_meta'), 10, 2);
         }
+
+        add_action('admin_enqueue_scripts', array($this, 'enqueue_term_assets'));
+        add_action('wp_ajax_aiseo_generate_term_seo', array($this, 'ajax_generate_term_seo'));
+    }
+
+    /**
+     * Generate buttons on term edit screens only.
+     *
+     * @param string $hook Current admin page.
+     */
+    public function enqueue_term_assets($hook) {
+        if ($hook !== 'term.php') {
+            return;
+        }
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        if (!$screen || empty($screen->taxonomy)) {
+            return;
+        }
+        wp_enqueue_script(
+            'aiseo-term-seo',
+            AISEO_PLUGIN_URL . 'admin/js/aiseo-term-seo.js',
+            array('jquery'),
+            AISEO_VERSION,
+            true
+        );
+        wp_localize_script('aiseo-term-seo', 'aiseoTermSeo', array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('aiseo_admin_nonce'),
+            'taxonomy' => $screen->taxonomy,
+            'i18n' => array(
+                'generating' => __('Generating...', 'aiseo'),
+                'failed' => __('Failed to generate', 'aiseo'),
+                'connectionError' => __('Connection error', 'aiseo'),
+                'generateTitle' => __('Generate title', 'aiseo'),
+                'generateDescription' => __('Generate description', 'aiseo'),
+            ),
+        ));
+    }
+
+    /**
+     * AI title or description for a category or tag, like Yoast Premium.
+     */
+    public function ajax_generate_term_seo() {
+        check_ajax_referer('aiseo_admin_nonce', 'nonce');
+        $term_id = isset($_POST['term_id']) ? absint($_POST['term_id']) : 0;
+        $taxonomy = isset($_POST['taxonomy']) ? sanitize_key(wp_unslash($_POST['taxonomy'])) : '';
+        $field = isset($_POST['field']) ? sanitize_key(wp_unslash($_POST['field'])) : '';
+        if (!$term_id || !$taxonomy || !in_array($field, array('title', 'description'), true)) {
+            wp_send_json_error(__('Invalid request.', 'aiseo'));
+        }
+        if (!current_user_can('edit_term', $term_id)) {
+            wp_send_json_error(__('Permission denied', 'aiseo'));
+        }
+        $term = get_term($term_id, $taxonomy);
+        if (!$term || is_wp_error($term)) {
+            wp_send_json_error(__('Term not found.', 'aiseo'));
+        }
+        $content = $term->name;
+        if (is_string($term->description) && $term->description !== '') {
+            $content .= "\n\n" . wp_strip_all_tags($term->description);
+        }
+        $keyword = '';
+        $meta = $this->get_term_meta($term_id, $taxonomy);
+        if (!empty($meta['keywords']) && is_string($meta['keywords'])) {
+            $keyword = $meta['keywords'];
+        }
+        $api = new AISEO_API();
+        $result = $field === 'title'
+            ? $api->generate_title($content, $keyword)
+            : $api->generate_meta_description($content, $keyword);
+        if (is_wp_error($result)) {
+            wp_send_json_error($result->get_error_message());
+        }
+        wp_send_json_success($result);
     }
     
     /**
@@ -92,6 +167,11 @@ class AISEO_Taxonomy_SEO {
                        id="aiseo_title" 
                        value="<?php echo esc_attr($meta['title']); ?>" 
                        class="large-text" />
+                <p>
+                    <button type="button" class="button aiseo-generate-term-seo" data-field="title" data-term-id="<?php echo esc_attr((string) $term->term_id); ?>">
+                        <?php esc_html_e('Generate title', 'aiseo'); ?>
+                    </button>
+                </p>
                 <p class="description">
                     <?php esc_html_e('Custom SEO title for this term archive page. Leave empty to use default.', 'aiseo'); ?>
                 </p>
@@ -107,8 +187,13 @@ class AISEO_Taxonomy_SEO {
                           id="aiseo_description" 
                           rows="3" 
                           class="large-text"><?php echo esc_textarea($meta['description']); ?></textarea>
+                <p>
+                    <button type="button" class="button aiseo-generate-term-seo" data-field="description" data-term-id="<?php echo esc_attr((string) $term->term_id); ?>">
+                        <?php esc_html_e('Generate description', 'aiseo'); ?>
+                    </button>
+                </p>
                 <p class="description">
-                    <?php esc_html_e('Meta description for this term archive page. Recommended: 155-160 characters.', 'aiseo'); ?>
+                    <?php esc_html_e('Leave empty to use the category or tag description format in Settings. Recommended: 155–160 characters.', 'aiseo'); ?>
                 </p>
             </td>
         </tr>
@@ -176,13 +261,12 @@ class AISEO_Taxonomy_SEO {
      */
     public function save_term_meta($term_id, $tt_id) {
         // Verify nonce
-        if (!isset($_POST['aiseo_taxonomy_meta_nonce']) || 
-            !wp_verify_nonce($_POST['aiseo_taxonomy_meta_nonce'], 'aiseo_taxonomy_meta')) {
+        if (!isset($_POST['aiseo_taxonomy_meta_nonce']) ||
+            !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['aiseo_taxonomy_meta_nonce'])), 'aiseo_taxonomy_meta')) {
             return;
         }
         
-        // Check permissions
-        if (!current_user_can('manage_categories')) {
+        if (!current_user_can('edit_term', $term_id)) {
             return;
         }
         
@@ -206,19 +290,19 @@ class AISEO_Taxonomy_SEO {
         $meta = array();
         
         if (isset($_POST['aiseo_title'])) {
-            $meta['title'] = sanitize_text_field($_POST['aiseo_title']);
+            $meta['title'] = sanitize_text_field(wp_unslash($_POST['aiseo_title']));
         }
         
         if (isset($_POST['aiseo_description'])) {
-            $meta['description'] = sanitize_textarea_field($_POST['aiseo_description']);
+            $meta['description'] = sanitize_textarea_field(wp_unslash($_POST['aiseo_description']));
         }
         
         if (isset($_POST['aiseo_keywords'])) {
-            $meta['keywords'] = sanitize_text_field($_POST['aiseo_keywords']);
+            $meta['keywords'] = sanitize_text_field(wp_unslash($_POST['aiseo_keywords']));
         }
         
         if (isset($_POST['aiseo_canonical'])) {
-            $meta['canonical'] = esc_url_raw($_POST['aiseo_canonical']);
+            $meta['canonical'] = esc_url_raw(wp_unslash($_POST['aiseo_canonical']));
         }
         
         $meta['noindex'] = isset($_POST['aiseo_noindex']) ? true : false;
@@ -319,7 +403,13 @@ class AISEO_Taxonomy_SEO {
         $meta = $this->get_term_meta($term->term_id, $term->taxonomy);
         
         // Meta description
-        $description = !empty($meta['description']) ? $meta['description'] : $term->description;
+        $description = !empty($meta['description']) ? $meta['description'] : '';
+        if ($description === '' && class_exists('AISEO_Title_Templates')) {
+            $description = (new AISEO_Title_Templates())->format_term_description($term);
+        }
+        if ($description === '') {
+            $description = $term->description;
+        }
         if (!empty($description)) {
             echo '<meta name="description" content="' . esc_attr($description) . '">' . "\n";
         }
@@ -330,24 +420,46 @@ class AISEO_Taxonomy_SEO {
         }
         
         // Canonical URL
-        $canonical = !empty($meta['canonical']) ? $meta['canonical'] : get_term_link($term);
-        if (!is_wp_error($canonical)) {
+        $canonical = !empty($meta['canonical']) ? esc_url($meta['canonical']) : '';
+        if ($canonical === '') {
+            $paged = max(1, (int) get_query_var('paged'), (int) get_query_var('page'));
+            if ($paged > 1) {
+                $canonical = esc_url(get_pagenum_link($paged));
+            } else {
+                $term_link = get_term_link($term);
+                $canonical = is_wp_error($term_link) ? '' : esc_url($term_link);
+            }
+        }
+        if ($canonical !== '') {
             echo '<link rel="canonical" href="' . esc_url($canonical) . '">' . "\n";
         }
         
-        // Robots meta
-        $robots = array();
-        if ($meta['noindex']) {
-            $robots[] = 'noindex';
-        } else {
-            $robots[] = 'index';
+    }
+
+    /**
+     * Apply a term's own robots setting to the single robots tag.
+     *
+     * @param array $robots Robots directives.
+     * @return array
+     */
+    public function filter_term_robots($robots) {
+        if (!is_category() && !is_tag() && !is_tax()) {
+            return $robots;
         }
-        if ($meta['nofollow']) {
-            $robots[] = 'nofollow';
-        } else {
-            $robots[] = 'follow';
+        $term = get_queried_object();
+        if (!$term || !isset($term->term_id)) {
+            return $robots;
         }
-        echo '<meta name="robots" content="' . esc_attr(implode(', ', $robots)) . '">' . "\n";
+        $meta = $this->get_term_meta($term->term_id, $term->taxonomy);
+        if (!empty($meta['noindex'])) {
+            $robots['noindex'] = true;
+            unset($robots['index']);
+        }
+        if (!empty($meta['nofollow'])) {
+            $robots['nofollow'] = true;
+            unset($robots['follow']);
+        }
+        return $robots;
     }
     
     /**

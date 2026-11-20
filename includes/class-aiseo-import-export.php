@@ -2,7 +2,7 @@
 /**
  * AISEO Import/Export Class
  * 
- * Import from Yoast, Rank Math, AIOSEO and export AISEO metadata
+ * Import from Yoast, Rank Math, AIOSEO, SEOPress and export AISEO metadata
  *
  * @package AISEO
  * @since 1.2.0
@@ -73,8 +73,8 @@ class AISEO_Import_Export {
                     'meta_description' => get_post_meta($post_id, '_aiseo_meta_description', true),
                     'focus_keyword' => get_post_meta($post_id, '_aiseo_focus_keyword', true),
                     'canonical_url' => get_post_meta($post_id, '_aiseo_canonical_url', true),
-                    'robots_index' => get_post_meta($post_id, '_aiseo_robots_index', true),
-                    'robots_follow' => get_post_meta($post_id, '_aiseo_robots_follow', true),
+                    'robots_index' => AISEO_Meta::post_is_noindex($post_id) ? 'noindex' : 'index',
+                    'robots_follow' => AISEO_Meta::post_is_nofollow($post_id) ? 'nofollow' : 'follow',
                     'og_title' => get_post_meta($post_id, '_aiseo_og_title', true),
                     'og_description' => get_post_meta($post_id, '_aiseo_og_description', true),
                     'twitter_title' => get_post_meta($post_id, '_aiseo_twitter_title', true),
@@ -286,11 +286,9 @@ class AISEO_Import_Export {
                 }
             }
             
-            // Import robots meta
             $yoast_noindex = get_post_meta($post_id, '_yoast_wpseo_meta-robots-noindex', true);
-            if (!empty($yoast_noindex)) {
-                $robots_index = ($yoast_noindex === '1') ? 'noindex' : 'index';
-                update_post_meta($post_id, '_aiseo_robots_index', $robots_index);
+            $yoast_nofollow = get_post_meta($post_id, '_yoast_wpseo_meta-robots-nofollow', true);
+            if ($this->import_robot_flags($post_id, $yoast_noindex === '1', $yoast_nofollow === '1', $options['overwrite'])) {
                 $imported = true;
             }
             
@@ -384,17 +382,14 @@ class AISEO_Import_Export {
                 }
             }
             
-            // Import robots meta
             $rm_robots = get_post_meta($post_id, 'rank_math_robots', true);
-            if (!empty($rm_robots) && is_array($rm_robots)) {
-                if (in_array('noindex', $rm_robots)) {
-                    update_post_meta($post_id, '_aiseo_robots_index', 'noindex');
-                    $imported = true;
-                }
-                if (in_array('nofollow', $rm_robots)) {
-                    update_post_meta($post_id, '_aiseo_robots_follow', 'nofollow');
-                    $imported = true;
-                }
+            if (is_array($rm_robots) && $this->import_robot_flags(
+                $post_id,
+                in_array('noindex', $rm_robots, true),
+                in_array('nofollow', $rm_robots, true),
+                $options['overwrite']
+            )) {
+                $imported = true;
             }
             
             if ($imported) {
@@ -487,6 +482,114 @@ class AISEO_Import_Export {
         
         return $results;
     }
+
+    /**
+     * Dispatch by plugin slug used in Bulk Operations.
+     *
+     * @param string $source yoast|rankmath|aioseo|seopress
+     * @param array  $options Import options.
+     * @return array|WP_Error
+     */
+    public function import_from($source, $options = array()) {
+        $source = sanitize_key($source);
+        if ($source === 'yoast') {
+            $result = $this->import_from_yoast($options);
+        } elseif ($source === 'rankmath') {
+            $result = $this->import_from_rankmath($options);
+        } elseif ($source === 'aioseo') {
+            $result = $this->import_from_aioseo($options);
+        } elseif ($source === 'seopress') {
+            $result = $this->import_from_seopress($options);
+        } else {
+            return new WP_Error('aiseo_import_source', __('Unknown import source.', 'aiseo'));
+        }
+        if (is_array($result) && !isset($result['count']) && isset($result['success'])) {
+            $result['count'] = $result['success'];
+        }
+        return $result;
+    }
+
+    /**
+     * Import from SEOPress post meta.
+     *
+     * @param array $options Import options.
+     * @return array|WP_Error
+     */
+    public function import_from_seopress($options = array()) {
+        $defaults = array(
+            'post_type' => 'post',
+            'limit' => -1,
+            'overwrite' => false,
+        );
+        $options = wp_parse_args($options, $defaults);
+        $posts = get_posts(array(
+            'post_type' => $options['post_type'],
+            'posts_per_page' => $options['limit'],
+            'post_status' => 'any',
+            'fields' => 'ids',
+        ));
+        if (empty($posts)) {
+            return new WP_Error('no_posts', __('No posts found', 'aiseo'));
+        }
+        $results = array(
+            'success' => 0,
+            'skipped' => 0,
+            'failed' => 0,
+            'count' => 0,
+        );
+        foreach ($posts as $post_id) {
+            if (!current_user_can('edit_post', $post_id)) {
+                $results['failed']++;
+                continue;
+            }
+            $imported = false;
+            $title = get_post_meta($post_id, '_seopress_titles_title', true);
+            if (is_string($title) && $title !== '') {
+                $existing = get_post_meta($post_id, '_aiseo_meta_title', true);
+                if ($existing === '' || $options['overwrite']) {
+                    update_post_meta($post_id, '_aiseo_meta_title', sanitize_text_field($title));
+                    $imported = true;
+                }
+            }
+            $desc = get_post_meta($post_id, '_seopress_titles_desc', true);
+            if (is_string($desc) && $desc !== '') {
+                $existing = get_post_meta($post_id, '_aiseo_meta_description', true);
+                if ($existing === '' || $options['overwrite']) {
+                    update_post_meta($post_id, '_aiseo_meta_description', sanitize_textarea_field($desc));
+                    $imported = true;
+                }
+            }
+            $keyword = get_post_meta($post_id, '_seopress_analysis_target_kw', true);
+            if (is_string($keyword) && $keyword !== '') {
+                $existing = get_post_meta($post_id, '_aiseo_focus_keyword', true);
+                if ($existing === '' || $options['overwrite']) {
+                    $first = trim(explode(',', $keyword)[0]);
+                    update_post_meta($post_id, '_aiseo_focus_keyword', sanitize_text_field($first));
+                    $imported = true;
+                }
+            }
+            $canonical = get_post_meta($post_id, '_seopress_robots_canonical', true);
+            if (is_string($canonical) && $canonical !== '') {
+                $existing = get_post_meta($post_id, '_aiseo_canonical_url', true);
+                if ($existing === '' || $options['overwrite']) {
+                    update_post_meta($post_id, '_aiseo_canonical_url', esc_url_raw($canonical));
+                    $imported = true;
+                }
+            }
+            $noindex = get_post_meta($post_id, '_seopress_robots_index', true) === 'yes';
+            $nofollow = get_post_meta($post_id, '_seopress_robots_follow', true) === 'yes';
+            if ($this->import_robot_flags($post_id, $noindex, $nofollow, $options['overwrite'])) {
+                $imported = true;
+            }
+            if ($imported) {
+                $results['success']++;
+            } else {
+                $results['skipped']++;
+            }
+        }
+        $results['count'] = $results['success'];
+        return $results;
+    }
     
     /**
      * Create backup of all AISEO metadata
@@ -526,8 +629,8 @@ class AISEO_Import_Export {
             'meta_description' => '_aiseo_meta_description',
             'focus_keyword' => '_aiseo_focus_keyword',
             'canonical_url' => '_aiseo_canonical_url',
-            'robots_index' => '_aiseo_robots_index',
-            'robots_follow' => '_aiseo_robots_follow',
+            'robots_index' => '_aiseo_noindex',
+            'robots_follow' => '_aiseo_nofollow',
             'og_title' => '_aiseo_og_title',
             'og_description' => '_aiseo_og_description',
             'twitter_title' => '_aiseo_twitter_title',
@@ -555,11 +658,11 @@ class AISEO_Import_Export {
         }
 
         if ($key === 'robots_index') {
-            return in_array($value, array('index', 'noindex'), true) ? $value : 'index';
+            return in_array($value, array('noindex', '1', 'true'), true) ? '1' : '0';
         }
 
         if ($key === 'robots_follow') {
-            return in_array($value, array('follow', 'nofollow'), true) ? $value : 'follow';
+            return in_array($value, array('nofollow', '1', 'true'), true) ? '1' : '0';
         }
 
         if ($key === 'meta_description' || $key === 'og_description' || $key === 'twitter_description') {
@@ -567,5 +670,33 @@ class AISEO_Import_Export {
         }
 
         return sanitize_text_field($value);
+    }
+
+    /**
+     * Write runtime noindex/nofollow keys used by meta tags and sitemaps.
+     *
+     * @param int  $post_id   Post ID.
+     * @param bool $noindex   Whether the source plugin marked the post noindex.
+     * @param bool $nofollow  Whether the source plugin marked the post nofollow.
+     * @param bool $overwrite Replace existing AISEO robots flags.
+     * @return bool True when at least one flag was written.
+     */
+    private function import_robot_flags($post_id, $noindex, $nofollow, $overwrite) {
+        $imported = false;
+        if ($noindex) {
+            $existing = get_post_meta($post_id, '_aiseo_noindex', true);
+            if ($overwrite || !in_array($existing, array(true, 1, '1'), true)) {
+                update_post_meta($post_id, '_aiseo_noindex', '1');
+                $imported = true;
+            }
+        }
+        if ($nofollow) {
+            $existing = get_post_meta($post_id, '_aiseo_nofollow', true);
+            if ($overwrite || !in_array($existing, array(true, 1, '1'), true)) {
+                update_post_meta($post_id, '_aiseo_nofollow', '1');
+                $imported = true;
+            }
+        }
+        return $imported;
     }
 }

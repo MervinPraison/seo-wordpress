@@ -25,6 +25,33 @@ class AISEO_Multilingual {
     public function __construct() {
         $this->detect_multilingual_plugin();
     }
+
+    /**
+     * Print hreflang when WPML, Polylang, or TranslatePress is active.
+     */
+    public function init() {
+        if (!$this->active_plugin) {
+            return;
+        }
+        add_action('wp_head', array($this, 'print_hreflang'), 2);
+    }
+
+    /**
+     * Front-end hreflang tags for the queried post, term, or archive.
+     */
+    public function print_hreflang() {
+        if (is_admin() || is_feed() || is_404() || is_search()) {
+            return;
+        }
+        if (is_singular()) {
+            $post_id = get_queried_object_id();
+            if ($post_id) {
+                $this->inject_hreflang_tags($post_id);
+            }
+            return;
+        }
+        $this->inject_archive_hreflang_tags();
+    }
     
     /**
      * Detect active multilingual plugin
@@ -191,8 +218,8 @@ class AISEO_Multilingual {
         }
         
         $post_type = get_post_type($post_id);
-        $trid = apply_filters('wpml_element_trid', null, $post_id, 'post_' . $post_type);
-        $translations_data = apply_filters('wpml_get_element_translations', null, $trid, 'post_' . $post_type);
+        $trid = apply_filters('wpml_element_trid', null, $post_id, 'post_' . $post_type); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WPML API.
+        $translations_data = apply_filters('wpml_get_element_translations', null, $trid, 'post_' . $post_type); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WPML API.
         
         $translations = [];
         foreach ($translations_data as $lang_code => $translation) {
@@ -299,7 +326,7 @@ class AISEO_Multilingual {
     public function get_default_language() {
         switch ($this->active_plugin) {
             case 'wpml':
-                return apply_filters('wpml_default_language', null);
+                return apply_filters('wpml_default_language', null); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WPML API.
             case 'polylang':
                 return pll_default_language();
             case 'translatepress':
@@ -311,6 +338,78 @@ class AISEO_Multilingual {
         }
     }
     
+    /**
+     * Hreflang for archives and terms (WPML current-URL map, Polylang term/home).
+     */
+    private function inject_archive_hreflang_tags() {
+        $tags = array();
+        if ($this->active_plugin === 'wpml' && function_exists('icl_get_languages')) {
+            $languages = icl_get_languages('skip_missing=1'); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals -- WPML API.
+            if (is_array($languages)) {
+                foreach ($languages as $lang) {
+                    if (empty($lang['language_code']) || empty($lang['url'])) {
+                        continue;
+                    }
+                    $tags[] = array(
+                        'hreflang' => $lang['language_code'],
+                        'href' => $lang['url'],
+                    );
+                }
+                $default = $this->get_default_language();
+                foreach ($languages as $lang) {
+                    if (!empty($lang['language_code']) && $lang['language_code'] === $default && !empty($lang['url'])) {
+                        $tags[] = array(
+                            'hreflang' => 'x-default',
+                            'href' => $lang['url'],
+                        );
+                        break;
+                    }
+                }
+            }
+        } elseif ($this->active_plugin === 'polylang' && function_exists('pll_languages_list')) {
+            $object = get_queried_object();
+            $languages = pll_languages_list();
+            if (is_array($languages)) {
+                foreach ($languages as $slug) {
+                    $url = '';
+                    if ($object instanceof WP_Term && function_exists('pll_get_term')) {
+                        $translated = pll_get_term($object->term_id, $slug);
+                        if ($translated) {
+                            $link = get_term_link((int) $translated, $object->taxonomy);
+                            if (!is_wp_error($link)) {
+                                $url = $link;
+                            }
+                        }
+                    } elseif ((is_front_page() || is_home()) && function_exists('pll_home_url')) {
+                        $url = pll_home_url($slug);
+                    }
+                    if (is_string($url) && $url !== '') {
+                        $tags[] = array(
+                            'hreflang' => $slug,
+                            'href' => $url,
+                        );
+                    }
+                }
+                $default = $this->get_default_language();
+                foreach ($tags as $tag) {
+                    if ($tag['hreflang'] === $default) {
+                        $tags[] = array(
+                            'hreflang' => 'x-default',
+                            'href' => $tag['href'],
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+        foreach ($tags as $tag) {
+            if (empty($tag['hreflang']) || empty($tag['href'])) {
+                continue;
+            }
+            echo '<link rel="alternate" hreflang="' . esc_attr($tag['hreflang']) . '" href="' . esc_url($tag['href']) . '" />' . "\n";
+        }
+    }
+
     /**
      * Inject hreflang tags into head
      *
@@ -357,6 +456,8 @@ class AISEO_Multilingual {
             '_aiseo_meta_description',
             '_aiseo_focus_keyword',
             '_aiseo_canonical_url',
+            '_aiseo_noindex',
+            '_aiseo_nofollow',
             '_aiseo_robots_index',
             '_aiseo_robots_follow',
             '_aiseo_og_title',

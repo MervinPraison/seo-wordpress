@@ -14,6 +14,155 @@ if (!defined('ABSPATH')) {
  * 404 Monitor & Redirection Manager Class
  */
 class AISEO_Redirects {
+
+    /**
+     * Apply stored redirects on the front end and record 404s.
+     */
+    public function init() {
+        $this->ensure_tables();
+        add_action('template_redirect', array($this, 'maybe_redirect'), 0);
+        add_action('template_redirect', array($this, 'maybe_log_404'), 99);
+        add_action('post_updated', array($this, 'redirect_changed_slug'), 10, 3);
+    }
+
+    /**
+     * Create the redirect tables when an older install does not have them.
+     */
+    public function ensure_tables() {
+        global $wpdb;
+        $table = $wpdb->prefix . 'aiseo_redirects';
+        $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table)));
+        if ($found !== $table && function_exists('aiseo_create_tables')) {
+            aiseo_create_tables();
+        }
+    }
+
+    /**
+     * Path-only form of a redirect source, with a leading slash.
+     *
+     * @param string $url Path or URL.
+     * @return string
+     */
+    public static function normalize_path($url) {
+        $url = trim((string) $url);
+        if ($url === '') {
+            return '';
+        }
+        $path = wp_parse_url($url, PHP_URL_PATH);
+        if (!is_string($path) || $path === '') {
+            $path = $url;
+        }
+        if ($path[0] !== '/') {
+            $path = '/' . $path;
+        }
+        return $path === '/' ? '/' : untrailingslashit($path);
+    }
+
+    /**
+     * Delimit a stored redirect pattern for preg_match.
+     *
+     * @param string $source Pattern.
+     * @return string
+     */
+    public static function regex_pattern($source) {
+        $source = (string) $source;
+        if ($source === '') {
+            return '';
+        }
+        return '~' . str_replace('~', '\~', $source) . '~';
+    }
+
+    /**
+     * Allow a local path or an http(s) URL.
+     *
+     * @param string $target Target entered by an administrator.
+     * @return string
+     */
+    public static function sanitize_target($target) {
+        $target = trim((string) $target);
+        if ($target === '') {
+            return '';
+        }
+        if (preg_match('#^[a-z][a-z0-9+.-]*:#i', $target) && !preg_match('#^https?://#i', $target)) {
+            return '';
+        }
+        if (strpos($target, '//') === 0) {
+            return '';
+        }
+        if ($target[0] === '/') {
+            return self::normalize_path($target);
+        }
+        return esc_url_raw($target);
+    }
+
+    /**
+     * Redirect the current request when a rule matches.
+     */
+    public function maybe_redirect() {
+        if (is_admin()) {
+            return;
+        }
+        if (is_singular()) {
+            $this->maybe_redirect_singular();
+        }
+        $requested = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '/';
+        $path = self::normalize_path($requested);
+        if ($path === '') {
+            return;
+        }
+        $this->process_redirect($path);
+    }
+
+    /**
+     * Per-post redirect from the editor Advanced tab.
+     */
+    public function maybe_redirect_singular() {
+        $post_id = get_queried_object_id();
+        if (!$post_id) {
+            return;
+        }
+        $type = get_post_meta($post_id, '_aiseo_redirect_type', true);
+        if (!in_array($type, array('301', '302', '307', '308', '410'), true)) {
+            return;
+        }
+        if ($type === '410') {
+            status_header(410);
+            nocache_headers();
+            $template = get_query_template('404');
+            if (is_string($template) && $template !== '' && is_readable($template)) {
+                include $template;
+            }
+            exit;
+        }
+        $target = get_post_meta($post_id, '_aiseo_redirect_to', true);
+        $target = is_string($target) ? self::sanitize_target($target) : '';
+        if ($target === '') {
+            return;
+        }
+        if (isset($target[0]) && $target[0] === '/') {
+            $target = home_url($target);
+        }
+        $current = get_permalink($post_id);
+        if (is_string($current) && untrailingslashit($current) === untrailingslashit($target)) {
+            return;
+        }
+        wp_safe_redirect($target, (int) $type);
+        exit;
+    }
+
+    /**
+     * Record a front-end 404 after redirects have had a chance to run.
+     */
+    public function maybe_log_404() {
+        if (is_admin() || !is_404()) {
+            return;
+        }
+        $requested = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '';
+        $path = self::normalize_path($requested);
+        if ($path !== '') {
+            $this->log_404_error($path);
+        }
+    }
     
     /**
      * Log 404 error
@@ -55,17 +204,11 @@ class AISEO_Redirects {
      * @return string IP address
      */
     private function get_client_ip() {
-        $ip = '';
-        
-        if (isset($_SERVER['HTTP_CLIENT_IP'])) {
-            $ip = sanitize_text_field(wp_unslash($_SERVER['HTTP_CLIENT_IP']));
-        } elseif (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $ip = sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR']));
-        } elseif (isset($_SERVER['REMOTE_ADDR'])) {
-            $ip = sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']));
+        $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : '';
+        if ($ip === '' || !filter_var($ip, FILTER_VALIDATE_IP)) {
+            return '';
         }
-        
-        return $ip;
+        return substr(hash('sha256', $ip . wp_salt('auth')), 0, 45);
     }
     
     /**
@@ -206,6 +349,64 @@ class AISEO_Redirects {
         
         return false;
     }
+
+    /**
+     * Send a stored redirect without using an unsanitised Location header.
+     *
+     * @param string $target Stored target.
+     * @param int    $status HTTP status.
+     */
+    private function send_redirect($target, $status) {
+        if (!in_array($status, array(301, 302, 307, 308, 410), true)) {
+            $status = 301;
+        }
+        if ($status === 410) {
+            status_header(410);
+            nocache_headers();
+            return;
+        }
+        if (is_string($target) && isset($target[0]) && $target[0] === '/') {
+            wp_safe_redirect(home_url($target), $status);
+            return;
+        }
+        if (!is_string($target) || !wp_http_validate_url($target)) {
+            return;
+        }
+        $local = wp_validate_redirect($target, false);
+        if ($local) {
+            wp_safe_redirect($local, $status);
+            return;
+        }
+        if (preg_match('#^https?://#i', $target)) {
+            wp_redirect(esc_url_raw($target), $status);
+        }
+    }
+
+    /**
+     * Keep a 301 when a published slug changes.
+     *
+     * @param int     $post_id     Post ID.
+     * @param WP_Post $post_after  Post after save.
+     * @param WP_Post $post_before Post before save.
+     */
+    public function redirect_changed_slug($post_id, $post_after, $post_before) {
+        if ((defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) || wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) {
+            return;
+        }
+        if (!$post_after instanceof WP_Post || !$post_before instanceof WP_Post) {
+            return;
+        }
+        if ($post_after->post_name === $post_before->post_name || $post_before->post_name === '' || $post_after->post_status !== 'publish') {
+            return;
+        }
+        $old_path = wp_parse_url(get_permalink($post_before), PHP_URL_PATH);
+        $new_url = get_permalink($post_after);
+        if (!is_string($old_path) || $old_path === '' || !is_string($new_url) || $new_url === '') {
+            return;
+        }
+        $this->ensure_tables();
+        $this->create_redirect($old_path, $new_url, '301');
+    }
     
     /**
      * Create redirect
@@ -220,14 +421,28 @@ class AISEO_Redirects {
         global $wpdb;
         
         // Validate redirect type
-        if (!in_array($type, ['301', '302', '307'])) {
+        if (!in_array($type, array('301', '302', '307', '308', '410'), true)) {
             return new WP_Error('invalid_type', 'Invalid redirect type');
         }
         
-        // Validate URLs
-        if (empty($source) || empty($target)) {
+        $is_regex = !empty($options['is_regex']);
+        if ($is_regex) {
+            $source = trim((string) $source);
+            if ($source === '' || strlen($source) > 200) {
+                return new WP_Error('invalid_regex', 'Regular expression must be 1 to 200 characters');
+            }
+            $pattern = self::regex_pattern($source);
+            if (@preg_match($pattern, '') === false) {
+                return new WP_Error('invalid_regex', 'Invalid regular expression');
+            }
+        } else {
+            $source = self::normalize_path($source);
+        }
+        $target = ($type === '410') ? '' : self::sanitize_target($target);
+        if ($source === '' || ($type !== '410' && ($target === '' || (!$is_regex && $source === self::normalize_path($target))))) {
             return new WP_Error('invalid_urls', 'Source and target URLs are required');
         }
+        $type = (string) $type;
         
         $table_name = $wpdb->prefix . 'aiseo_redirects';
         
@@ -247,10 +462,10 @@ class AISEO_Redirects {
         $result = $wpdb->insert(
             $table_name,
             [
-                'source_url' => esc_url_raw($source),
-                'target_url' => esc_url_raw($target),
+                'source_url' => $source,
+                'target_url' => $target,
                 'redirect_type' => $type,
-                'is_regex' => isset($options['is_regex']) ? (int) $options['is_regex'] : 0,
+                'is_regex' => $is_regex ? 1 : 0,
                 'hits' => 0,
                 'created_at' => current_time('mysql')
             ],
@@ -260,9 +475,6 @@ class AISEO_Redirects {
         if ($result === false) {
             return new WP_Error('db_error', 'Failed to create redirect');
         }
-        
-        // Flush rewrite rules
-        flush_rewrite_rules();
         
         return $wpdb->insert_id;
     }
@@ -322,11 +534,7 @@ class AISEO_Redirects {
             ['%d']
         );
         
-        if ($result !== false) {
-            flush_rewrite_rules();
-        }
-        
-        return $result !== false;
+        return $result > 0;
     }
     
     /**
@@ -341,12 +549,10 @@ class AISEO_Redirects {
         $errors = [];
         
         foreach ($lines as $index => $line) {
-            // Skip header row
-            if ($index === 0) {
+            $data = str_getcsv($line, ',', '"', '\\');
+            if ($index === 0 && isset($data[0]) && preg_match('/source/i', (string) $data[0])) {
                 continue;
             }
-            
-            $data = str_getcsv($line);
             
             if (count($data) < 2) {
                 continue;
@@ -423,7 +629,8 @@ class AISEO_Redirects {
             );
             
             foreach ($regex_redirects as $regex_redirect) {
-                if (preg_match('#' . $regex_redirect['source_url'] . '#', $requested_url)) {
+                $pattern = self::regex_pattern($regex_redirect['source_url']);
+                if ($pattern !== '' && @preg_match($pattern, $requested_url)) {
                     $redirect = $regex_redirect;
                     break;
                 }
@@ -441,8 +648,7 @@ class AISEO_Redirects {
                 ['%d']
             );
             
-            // Perform redirect
-            wp_redirect($redirect['target_url'], (int) $redirect['redirect_type']);
+            $this->send_redirect($redirect['target_url'], (int) $redirect['redirect_type']);
             exit;
         }
         
@@ -469,7 +675,7 @@ class AISEO_Redirects {
         
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Custom table statistics
         $top_404s = $wpdb->get_results(
-            "SELECT url, COUNT(*) as hits 
+            "SELECT url, COUNT(*) as hits, MAX(timestamp) as last_hit
              FROM {$errors_table} 
              GROUP BY url 
              ORDER BY hits DESC 

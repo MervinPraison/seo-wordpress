@@ -83,13 +83,14 @@ class AISEO_Keyword_CLI {
                     'type' => $kw['type'],
                     'intent' => $kw['intent'],
                     'difficulty' => $kw['difficulty'],
-                    'search_volume' => $kw['search_volume'],
+                    'difficulty_source' => $kw['difficulty_source'] ?? 'ai_estimate',
+                    'search_volume' => 'n/a',
                     'competition' => $kw['competition']
                 ];
             }
             
             WP_CLI\Utils\format_items($format, $display_data, 
-                ['keyword', 'type', 'intent', 'difficulty', 'search_volume', 'competition']);
+                ['keyword', 'type', 'intent', 'difficulty', 'difficulty_source', 'search_volume', 'competition']);
         }
     }
     
@@ -217,11 +218,11 @@ class AISEO_Keyword_CLI {
         if ($format === 'json') {
             WP_CLI::log(json_encode($result, JSON_PRETTY_PRINT));
         } else {
-            WP_CLI::log('Difficulty Analysis:');
-            WP_CLI::log(sprintf('  Score: %d/100', $result['difficulty_score']));
-            WP_CLI::log(sprintf('  Level: %s', $result['difficulty_level']));
-            WP_CLI::log(sprintf('  Type: %s', $result['keyword_type']));
-            WP_CLI::log(sprintf('  Length: %d words', $result['keyword_length']));
+            WP_CLI::log('Difficulty Analysis (AI estimate, not a SERP score):');
+            WP_CLI::log(sprintf('  Level: %s', $result['difficulty_level'] ?? 'unknown'));
+            WP_CLI::log(sprintf('  Source: %s', $result['source'] ?? 'ai_estimate'));
+            WP_CLI::log(sprintf('  Type: %s', $result['keyword_type'] ?? ''));
+            WP_CLI::log(sprintf('  Length: %d words', $result['keyword_length'] ?? 0));
             
             if (!empty($result['factors'])) {
                 WP_CLI::log('');

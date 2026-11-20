@@ -38,7 +38,8 @@
                 url: aiseoAdmin.ajaxUrl,
                 type: 'POST',
                 data: {
-                    action: aiseoAdmin.nonceRefreshAction
+                    action: aiseoAdmin.nonceRefreshAction,
+                    nonce: aiseoAdmin.refreshNonce
                 },
                 success: (response) => {
                     this.refreshing = false;
@@ -499,6 +500,68 @@
     // Initialize on document ready
     $(document).ready(function() {
         AISEO_Admin.init();
+
+        $(document).on('click', '.aiseo-media-select', function(e) {
+            e.preventDefault();
+            if (typeof wp === 'undefined' || !wp.media) {
+                return;
+            }
+            var $button = $(this);
+            var frame = wp.media({
+                title: $button.text(),
+                library: { type: 'image' },
+                multiple: false
+            });
+            frame.on('select', function() {
+                var attachment = frame.state().get('selection').first().toJSON();
+                var target = $button.data('target');
+                var preview = $button.data('preview');
+                if (target) {
+                    $('#' + target).val(attachment.id);
+                }
+                if (preview) {
+                    var src = (attachment.sizes && attachment.sizes.medium) ? attachment.sizes.medium.url : attachment.url;
+                    $('#' + preview).attr('src', src).removeAttr('hidden');
+                }
+            });
+            frame.open();
+        });
+
+        $(document).on('click', '.aiseo-media-clear', function(e) {
+            e.preventDefault();
+            var $button = $(this);
+            var target = $button.data('target');
+            var preview = $button.data('preview');
+            if (target) {
+                $('#' + target).val('');
+            }
+            if (preview) {
+                $('#' + preview).attr('src', '').attr('hidden', 'hidden');
+            }
+        });
+
+        $(document).on('click', '.aiseo-404-add-redirect', function () {
+            var btn = $(this);
+            var from = btn.data('from');
+            var to = btn.closest('td').find('.aiseo-404-target').val();
+            if (!from || !to) {
+                return;
+            }
+            btn.prop('disabled', true);
+            $.post(aiseoAdmin.ajaxUrl, {
+                action: 'aiseo_add_redirect',
+                nonce: aiseoAdmin.nonce,
+                from_url: from,
+                to_url: to,
+                redirect_type: '301'
+            }).done(function (response) {
+                var notice = (response && response.success) ? (aiseoAdmin.strings && aiseoAdmin.strings.redirectAdded) || 'Redirect added.' : ((response && response.data) ? String(response.data) : 'Could not add redirect.');
+                btn.siblings('.aiseo-404-notice').remove();
+                btn.after($('<span class="aiseo-404-notice"></span>').text(' ' + notice));
+            }).always(function () {
+                btn.prop('disabled', false);
+            });
+        });
     });
     
 })(jQuery);

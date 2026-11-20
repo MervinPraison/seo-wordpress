@@ -115,16 +115,8 @@ class AISEO_Homepage_SEO {
                 $settings['home_keywords']
             );
         } elseif (is_front_page()) {
-            // Static front page - check for page-specific meta first
-            $front_page_id = get_option('page_on_front');
-            $page_desc = get_post_meta($front_page_id, '_aiseo_meta_description', true);
-            $page_keywords = get_post_meta($front_page_id, '_aiseo_meta_keywords', true);
-            
-            // Use global settings as fallback
-            $description = !empty($page_desc) ? $page_desc : $settings['home_description'];
-            $keywords = !empty($page_keywords) ? $page_keywords : $settings['home_keywords'];
-            
-            $this->output_meta_tags('', $description, $keywords);
+            // A static front page is a singular page. AISEO_Meta already prints its description.
+            return;
         } elseif (is_home()) {
             // Blog page (static page for posts)
             $blog_page_id = get_option('page_for_posts');

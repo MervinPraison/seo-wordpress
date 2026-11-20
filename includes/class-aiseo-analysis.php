@@ -53,6 +53,7 @@ class AISEO_Analysis {
             'internal_links' => $this->check_internal_links($content),
             'external_links' => $this->check_external_links($content),
             'images' => $this->analyze_images($content),
+            'additional_keywords' => $this->analyze_additional_keywords($content, $post_id, $keyword),
         );
         
         // Calculate overall score
@@ -184,6 +185,51 @@ class AISEO_Analysis {
             'message' => $message,
             'flesch_kincaid' => round($flesch_score, 1),
             'reading_level' => $this->get_reading_level($flesch_score),
+        );
+    }
+
+    /**
+     * Whether extra focus keywords appear in the content.
+     *
+     * @param string $content Content.
+     * @param int    $post_id Post ID.
+     * @param string $primary Primary keyword.
+     * @return array
+     */
+    public function analyze_additional_keywords($content, $post_id, $primary) {
+        $keywords = AISEO_Helpers::get_additional_keywords($post_id);
+        if (!$keywords) {
+            return array(
+                'score' => 100,
+                'status' => 'ok',
+                'message' => __('No extra keywords set.', 'aiseo'),
+                'missing' => array(),
+            );
+        }
+        $haystack = strtolower(AISEO_Helpers::strip_shortcodes_and_tags($content . ' ' . $primary));
+        $missing = array();
+        foreach ($keywords as $keyword) {
+            if (strpos($haystack, strtolower($keyword)) === false) {
+                $missing[] = $keyword;
+            }
+        }
+        if (!$missing) {
+            return array(
+                'score' => 100,
+                'status' => 'good',
+                'message' => __('All extra keywords appear in the content.', 'aiseo'),
+                'missing' => array(),
+            );
+        }
+        return array(
+            'score' => 50,
+            'status' => 'warning',
+            'message' => sprintf(
+                /* translators: %s: comma-separated keywords */
+                __('Extra keywords missing from the content: %s.', 'aiseo'),
+                implode(', ', $missing)
+            ),
+            'missing' => $missing,
         );
     }
     

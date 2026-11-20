@@ -16,42 +16,26 @@ if (!defined('ABSPATH')) {
 class AISEO_Helpers {
     
     /**
-     * Generate encryption keys and save to wp-config.php
+     * Generate encryption keys in options. Never write wp-config.php.
      */
     public static function generate_encryption_keys() {
-        $config_file = ABSPATH . 'wp-config.php';
-        
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable -- Simple permission check, full WP_Filesystem not needed
-        if (!is_writable($config_file)) {
-            return false;
-        }
-        
-        // Generate random keys
-        $encryption_key = bin2hex(random_bytes(32));
-        $encryption_salt = bin2hex(random_bytes(32));
-        
-        // Read wp-config.php
-        $config_content = file_get_contents($config_file);
-        
-        // Check if keys already exist
-        if (strpos($config_content, 'AISEO_ENCRYPTION_KEY') !== false) {
+        if (self::encryption_key() !== '') {
             return true;
         }
-        
-        // Add keys before the "That's all, stop editing!" line
-        $keys_code = "\n// AISEO Encryption Keys\n";
-        $keys_code .= "define('AISEO_ENCRYPTION_KEY', '$encryption_key');\n";
-        $keys_code .= "define('AISEO_ENCRYPTION_SALT', '$encryption_salt');\n";
-        
-        $config_content = str_replace(
-            "/* That's all, stop editing!",
-            $keys_code . "/* That's all, stop editing!",
-            $config_content
-        );
-        
-        file_put_contents($config_file, $config_content);
-        
+        add_option('aiseo_encryption_key', bin2hex(random_bytes(32)), '', 'no');
+        add_option('aiseo_encryption_salt', bin2hex(random_bytes(32)), '', 'no');
         return true;
+    }
+
+    /**
+     * @return string
+     */
+    private static function encryption_key() {
+        if (defined('AISEO_ENCRYPTION_KEY') && is_string(AISEO_ENCRYPTION_KEY) && AISEO_ENCRYPTION_KEY !== '') {
+            return AISEO_ENCRYPTION_KEY;
+        }
+        $key = get_option('aiseo_encryption_key', '');
+        return is_string($key) ? $key : '';
     }
     
     /**
@@ -65,7 +49,8 @@ class AISEO_Helpers {
             return '';
         }
         
-        if (!defined('AISEO_ENCRYPTION_KEY')) {
+        $secret = self::encryption_key();
+        if ($secret === '') {
             return $key; // Return unencrypted if no key available
         }
         
@@ -76,7 +61,7 @@ class AISEO_Helpers {
         $encrypted = openssl_encrypt(
             $key,
             $cipher,
-            AISEO_ENCRYPTION_KEY,
+            $secret,
             OPENSSL_RAW_DATA,
             $iv
         );
@@ -95,7 +80,8 @@ class AISEO_Helpers {
             return '';
         }
         
-        if (!defined('AISEO_ENCRYPTION_KEY')) {
+        $secret = self::encryption_key();
+        if ($secret === '') {
             return $encrypted_key; // Return as-is if no key available
         }
         
@@ -111,7 +97,7 @@ class AISEO_Helpers {
         return openssl_decrypt(
             $encrypted_data,
             $cipher,
-            AISEO_ENCRYPTION_KEY,
+            $secret,
             OPENSSL_RAW_DATA,
             $iv
         );
@@ -193,6 +179,49 @@ class AISEO_Helpers {
      */
     public static function get_focus_keyword($post_id) {
         return get_post_meta($post_id, '_aiseo_focus_keyword', true);
+    }
+
+    /**
+     * Extra focus keywords, Rank Math-style. Maximum four besides the primary.
+     *
+     * @param int $post_id Post ID.
+     * @return string[]
+     */
+    public static function get_additional_keywords($post_id) {
+        return self::parse_additional_keywords(get_post_meta($post_id, '_aiseo_additional_keywords', true), self::get_focus_keyword($post_id));
+    }
+
+    /**
+     * @param mixed  $raw     Stored or posted value.
+     * @param string $primary Primary keyword to exclude.
+     * @return string[]
+     */
+    public static function parse_additional_keywords($raw, $primary = '') {
+        if (is_array($raw)) {
+            $parts = $raw;
+        } else {
+            $parts = preg_split('/[\n,]+/', is_string($raw) ? $raw : '');
+        }
+        $primary = strtolower(trim((string) $primary));
+        $keywords = array();
+        foreach ($parts as $part) {
+            $part = sanitize_text_field($part);
+            $part = trim($part);
+            if ($part === '') {
+                continue;
+            }
+            $key = strtolower($part);
+            if ($primary !== '' && $key === $primary) {
+                continue;
+            }
+            if (!isset($keywords[$key])) {
+                $keywords[$key] = $part;
+            }
+            if (count($keywords) >= 4) {
+                break;
+            }
+        }
+        return array_values($keywords);
     }
     
     /**

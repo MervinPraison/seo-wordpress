@@ -26,12 +26,47 @@ class AISEO_Permalink {
     ];
     
     /**
-     * Optimize permalink
+     * Replace a post slug when the optimiser changes it, and keep a 301 from the old path.
      *
-     * @param string $slug Current slug
-     * @param string $keyword Focus keyword (optional)
-     * @return array Optimized slug and suggestions
+     * @param int $post_id Post ID.
+     * @return bool Whether the slug changed.
      */
+    public function optimize_post_slug($post_id) {
+        $post = get_post($post_id);
+        if (!$post || !current_user_can('edit_post', $post_id)) {
+            return false;
+        }
+
+        $keyword = get_post_meta($post_id, '_aiseo_focus_keyword', true);
+        $result = $this->optimize_permalink($post->post_name, (string) $keyword);
+        $optimized = isset($result['optimized']) ? $result['optimized'] : '';
+        if ($optimized === '' || $optimized === $post->post_name) {
+            return false;
+        }
+
+        $optimized = wp_unique_post_slug($optimized, $post->ID, $post->post_status, $post->post_type, $post->post_parent);
+        if ($optimized === $post->post_name) {
+            return false;
+        }
+
+        $old_path = wp_parse_url(get_permalink($post), PHP_URL_PATH);
+        $updated = wp_update_post(array(
+            'ID' => $post->ID,
+            'post_name' => $optimized,
+        ), true);
+        if (is_wp_error($updated) || !$updated) {
+            return false;
+        }
+
+        if (is_string($old_path) && $old_path !== '' && class_exists('AISEO_Redirects')) {
+            $redirects = new AISEO_Redirects();
+            $redirects->ensure_tables();
+            $redirects->create_redirect($old_path, get_permalink($post->ID), '301');
+        }
+
+        return true;
+    }
+
     public function optimize_permalink($slug, $keyword = '') {
         $original = $slug;
         

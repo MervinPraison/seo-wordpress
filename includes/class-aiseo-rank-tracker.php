@@ -33,7 +33,6 @@ class AISEO_Rank_Tracker {
         // Get site URL
         $site_url = get_site_url();
         
-        // Simulate rank checking (in production, this would use a real SERP API)
         $rank_data = $this->check_serp_position($keyword, $site_url, $location);
         
         if (is_wp_error($rank_data)) {
@@ -72,7 +71,7 @@ class AISEO_Rank_Tracker {
     }
     
     /**
-     * Check SERP position (simulated - in production use real SERP API)
+     * Search position. Returns an error until a real provider is connected.
      *
      * @param string $keyword Keyword to check
      * @param string $site_url Site URL to find
@@ -80,74 +79,10 @@ class AISEO_Rank_Tracker {
      * @return array|WP_Error Position data or error
      */
     private function check_serp_position($keyword, $site_url, $location) {
-        // In production, this would call a real SERP API like:
-        // - Google Search Console API
-        // - SerpApi
-        // - DataForSEO
-        // - SEMrush API
-        
-        // For now, simulate with AI-powered estimation
-        $api = new AISEO_API();
-        
-        $prompt = "Estimate the likely SERP position for this scenario:
-        Keyword: {$keyword}
-        Website: {$site_url}
-        Location: {$location}
-        
-        Provide realistic estimation as JSON:
-        {
-            \"position\": 1-100,
-            \"url\": \"actual ranking URL\",
-            \"serp_features\": [\"feature1\", \"feature2\"]
-        }
-        
-        SERP features can include: featured_snippet, people_also_ask, local_pack, knowledge_panel, image_pack, video, news, shopping";
-        
-        $response = $api->make_request([
-            'model' => get_option('aiseo_api_model', 'gpt-4o-mini'),
-            'messages' => [
-                ['role' => 'system', 'content' => 'You are a SERP analysis expert. Provide realistic rank estimations.'],
-                ['role' => 'user', 'content' => $prompt]
-            ],
-            'temperature' => 0.7,
-            'max_tokens' => 500
-        ]);
-        
-        if (is_wp_error($response)) {
-            // Fallback to simple simulation
-            return [
-                'position' => wp_rand(1, 100),
-                'url' => trailingslashit($site_url),
-                'serp_features' => []
-            ];
-        }
-        
-        $content = $response['choices'][0]['message']['content'] ?? '';
-        preg_match('/\{.*\}/s', $content, $matches);
-        
-        if (empty($matches[0])) {
-            return [
-                'position' => wp_rand(1, 100),
-                'url' => trailingslashit($site_url),
-                'serp_features' => []
-            ];
-        }
-        
-        $data = json_decode($matches[0], true);
-        
-        if (!is_array($data)) {
-            return [
-                'position' => wp_rand(1, 100),
-                'url' => trailingslashit($site_url),
-                'serp_features' => []
-            ];
-        }
-        
-        return [
-            'position' => isset($data['position']) ? absint($data['position']) : wp_rand(1, 100),
-            'url' => isset($data['url']) ? esc_url_raw($data['url']) : trailingslashit($site_url),
-            'serp_features' => isset($data['serp_features']) && is_array($data['serp_features']) ? $data['serp_features'] : []
-        ];
+        return new WP_Error(
+            'aiseo_rank_unavailable',
+            __('A search position is not available. Connect a search results provider before tracking ranks.', 'aiseo')
+        );
     }
     
     /**
@@ -245,29 +180,27 @@ class AISEO_Rank_Tracker {
         // Simulate competitor position check (in production, use real SERP API)
         $competitor_position = $this->check_competitor_position($keyword, $competitor_url);
         
-        $difference = $our_position && $competitor_position ? ($competitor_position - $our_position) : 0;
-        
-        return [
-            'keyword' => $keyword,
-            'our_position' => $our_position ? absint($our_position) : null,
-            'competitor_position' => $competitor_position,
-            'competitor_url' => $competitor_url,
-            'difference' => $difference,
-            'status' => $difference > 0 ? 'ahead' : ($difference < 0 ? 'behind' : 'equal')
-        ];
+        if ($competitor_position === null) {
+            return [
+                'keyword' => $keyword,
+                'our_position' => $our_position ? absint($our_position) : null,
+                'competitor_position' => null,
+                'competitor_url' => $competitor_url,
+                'difference' => null,
+                'status' => 'unavailable',
+            ];
+        }
     }
     
     /**
-     * Check competitor position (simulated)
+     * Competitor position. Null until a real provider is connected.
      *
      * @param string $keyword Keyword
      * @param string $competitor_url Competitor URL
      * @return int Position
      */
     private function check_competitor_position($keyword, $competitor_url) {
-        // In production, this would use a real SERP API
-        // For now, return a simulated position
-        return wp_rand(1, 100);
+        return null;
     }
     
     /**
@@ -280,58 +213,11 @@ class AISEO_Rank_Tracker {
         if (empty($keyword)) {
             return new WP_Error('invalid_keyword', 'Keyword is required');
         }
-        
-        $api = new AISEO_API();
-        
-        $prompt = "Analyze what SERP features are likely to appear for this keyword: \"{$keyword}\"
-        
-        Provide analysis as JSON:
-        {
-            \"features\": [\"feature1\", \"feature2\"],
-            \"opportunities\": [\"opportunity1\", \"opportunity2\"],
-            \"difficulty\": \"easy|medium|hard\"
-        }
-        
-        Common SERP features:
-        - featured_snippet
-        - people_also_ask
-        - local_pack
-        - knowledge_panel
-        - image_pack
-        - video
-        - news
-        - shopping
-        - reviews
-        - site_links";
-        
-        $response = $api->make_request([
-            'model' => get_option('aiseo_api_model', 'gpt-4o-mini'),
-            'messages' => [
-                ['role' => 'system', 'content' => 'You are a SERP feature analysis expert.'],
-                ['role' => 'user', 'content' => $prompt]
-            ],
-            'temperature' => 0.5,
-            'max_tokens' => 600
-        ]);
-        
-        if (is_wp_error($response)) {
-            return $response;
-        }
-        
-        $content = $response['choices'][0]['message']['content'] ?? '';
-        preg_match('/\{.*\}/s', $content, $matches);
-        
-        if (empty($matches[0])) {
-            return new WP_Error('parse_error', 'Failed to parse SERP features');
-        }
-        
-        $data = json_decode($matches[0], true);
-        
-        if (!is_array($data)) {
-            return new WP_Error('invalid_response', 'Invalid SERP features data');
-        }
-        
-        return $data;
+
+        return new WP_Error(
+            'aiseo_serp_unavailable',
+            __('Search result features are not available. Connect a search results provider before requesting them.', 'aiseo')
+        );
     }
     
     /**

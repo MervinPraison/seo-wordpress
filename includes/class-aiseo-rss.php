@@ -155,14 +155,14 @@ class AISEO_RSS {
         }
         
         $replacements = array(
-            '%post_title%' => get_the_title($post),
-            '%post_url%' => get_permalink($post),
-            '%post_author%' => get_the_author_meta('display_name', $post->post_author),
-            '%post_date%' => get_the_date('', $post),
-            '%site_name%' => get_bloginfo('name'),
-            '%site_url%' => home_url('/'),
-            '%post_excerpt%' => get_the_excerpt($post),
-            '%post_categories%' => $this->get_post_categories($post),
+            '%post_title%' => esc_html(get_the_title($post)),
+            '%post_url%' => esc_url(get_permalink($post)),
+            '%post_author%' => esc_html(get_the_author_meta('display_name', $post->post_author)),
+            '%post_date%' => esc_html(get_the_date('', $post)),
+            '%site_name%' => esc_html(get_bloginfo('name')),
+            '%site_url%' => esc_url(home_url('/')),
+            '%post_excerpt%' => esc_html(wp_strip_all_tags(get_the_excerpt($post))),
+            '%post_categories%' => esc_html($this->get_post_categories($post)),
         );
         
         return str_replace(

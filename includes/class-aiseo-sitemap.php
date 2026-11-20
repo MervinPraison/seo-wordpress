@@ -25,10 +25,10 @@ class AISEO_Sitemap {
      */
     const CACHE_DURATION = 43200;
     
-    /**
-     * Initialize sitemap generator
-     */
     public function init() {
+        if (!$this->is_enabled()) {
+            return;
+        }
         // Disable WordPress core sitemaps (we're replacing them)
         add_filter('wp_sitemaps_enabled', '__return_false');
         
@@ -48,59 +48,91 @@ class AISEO_Sitemap {
         // Add sitemap to robots.txt
         add_filter('robots_txt', array($this, 'add_sitemap_to_robots'), 10, 2);
     }
+
+    /**
+     * Whether the XML sitemap is switched on.
+     *
+     * @return bool
+     */
+    public function is_enabled() {
+        $enabled = get_option('aiseo_enable_sitemap', '1');
+        return !in_array($enabled, array(false, 0, '0', ''), true);
+    }
     
     /**
      * Add rewrite rules for sitemap
      */
     public function add_rewrite_rules() {
         // Add query vars
-        add_filter('query_vars', function($vars) {
-            $vars[] = 'aiseo_sitemap';
-            $vars[] = 'aiseo_sitemap_type';
-            return $vars;
-        });
-        
-        // Use rewrite_rules_array filter to ensure our rules come first
-        add_filter('rewrite_rules_array', function($rules) {
-            $new_rules = array(
-                // OLD-STYLE URLs (PRIMARY - for migration compatibility)
-                // Main sitemap index (old Yoast-style)
-                '^sitemap_index\.xml$' => 'index.php?aiseo_sitemap=index',
-                // Old-style post type sitemaps
-                '^post-sitemap\.xml$' => 'index.php?aiseo_sitemap=posts-post-1',
-                '^page-sitemap\.xml$' => 'index.php?aiseo_sitemap=posts-page-1',
-                '^([a-z0-9_-]+)-sitemap\.xml$' => 'index.php?aiseo_sitemap=posts-$matches[1]-1',
-                // Old-style taxonomy sitemaps
-                '^category-sitemap\.xml$' => 'index.php?aiseo_sitemap=taxonomies-category-1',
-                '^post_tag-sitemap\.xml$' => 'index.php?aiseo_sitemap=taxonomies-post_tag-1',
-                
-                // NEW-STYLE URLs (BACKUP - WordPress standard)
-                // Primary WordPress standard path
-                '^wp-sitemap\.xml$' => 'index.php?aiseo_sitemap=index',
-                // User-friendly alias
-                '^sitemap\.xml$' => 'index.php?aiseo_sitemap=index',
-                // Sub-sitemaps (WordPress standard format)
-                '^wp-sitemap-posts-([^-]+)-([0-9]+)\.xml$' => 'index.php?aiseo_sitemap=posts-$matches[1]-$matches[2]',
-                '^wp-sitemap-taxonomies-([^-]+)-([0-9]+)\.xml$' => 'index.php?aiseo_sitemap=taxonomies-$matches[1]-$matches[2]',
-                '^wp-sitemap-users-([0-9]+)\.xml$' => 'index.php?aiseo_sitemap=users-$matches[1]',
-            );
-            return $new_rules + $rules;
-        });
+        add_filter('query_vars', array($this, 'register_query_vars'));
+        add_filter('rewrite_rules_array', array($this, 'register_rewrite_rules'));
+    }
+
+    /**
+     * @param array $vars Query vars.
+     * @return array
+     */
+    public function register_query_vars($vars) {
+        $vars[] = 'aiseo_sitemap';
+        $vars[] = 'aiseo_sitemap_type';
+        return $vars;
+    }
+
+    /**
+     * @param array $rules Existing rewrite rules.
+     * @return array
+     */
+    public function register_rewrite_rules($rules) {
+        $new_rules = array(
+            '^sitemap_index\.xml$' => 'index.php?aiseo_sitemap=index',
+            '^post-sitemap\.xml$' => 'index.php?aiseo_sitemap=posts-post-1',
+            '^page-sitemap\.xml$' => 'index.php?aiseo_sitemap=posts-page-1',
+            '^google-news-sitemap\.xml$' => 'index.php?aiseo_sitemap=newsfeed',
+            '^video-sitemap\.xml$' => 'index.php?aiseo_sitemap=videofeed',
+            '^image-sitemap\.xml$' => 'index.php?aiseo_sitemap=imagefeed',
+            '^([a-z0-9_-]+)-sitemap\.xml$' => 'index.php?aiseo_sitemap=posts-$matches[1]-1',
+            '^category-sitemap\.xml$' => 'index.php?aiseo_sitemap=taxonomies-category-1',
+            '^post_tag-sitemap\.xml$' => 'index.php?aiseo_sitemap=taxonomies-post_tag-1',
+            '^wp-sitemap\.xml$' => 'index.php?aiseo_sitemap=index',
+            '^sitemap\.xml$' => 'index.php?aiseo_sitemap=index',
+            '^wp-sitemap-posts-([^-]+)-([0-9]+)\.xml$' => 'index.php?aiseo_sitemap=posts-$matches[1]-$matches[2]',
+            '^wp-sitemap-taxonomies-([^-]+)-([0-9]+)\.xml$' => 'index.php?aiseo_sitemap=taxonomies-$matches[1]-$matches[2]',
+            '^wp-sitemap-users-([0-9]+)\.xml$' => 'index.php?aiseo_sitemap=users-$matches[1]',
+        );
+        return $new_rules + $rules;
     }
     
     /**
      * Handle sitemap requests
      */
     public function handle_sitemap_request() {
-        $sitemap = get_query_var('aiseo_sitemap');
-        
-        if (empty($sitemap)) {
+        if (!$this->is_enabled()) {
             return;
+        }
+        $sitemap = $this->sitemap_var_from_request();
+        if ($sitemap === '') {
+            $query_sitemap = get_query_var('aiseo_sitemap');
+            $sitemap = is_string($query_sitemap) ? $query_sitemap : '';
+        }
+        
+        if ($sitemap === '') {
+            return;
+        }
+
+        status_header(200);
+        if (isset($GLOBALS['wp_query']) && $GLOBALS['wp_query'] instanceof WP_Query) {
+            $GLOBALS['wp_query']->is_404 = false;
         }
         
         // Generate sitemap
         if ($sitemap === '1' || $sitemap === 'index') {
             $this->output_sitemap_index();
+        } elseif ($sitemap === 'newsfeed') {
+            $this->output_news_sitemap();
+        } elseif ($sitemap === 'videofeed') {
+            $this->output_video_sitemap();
+        } elseif ($sitemap === 'imagefeed') {
+            $this->output_image_sitemap();
         } else {
             // Parse WordPress standard format: posts-{type}-{page} or taxonomies-{type}-{page} or users-{page}
             $parts = explode('-', $sitemap);
@@ -126,6 +158,50 @@ class AISEO_Sitemap {
         
         exit;
     }
+
+    /**
+     * Read a sitemap address directly from the request path.
+     * This still serves the file when the rewrite rules have not been flushed.
+     *
+     * @return string Sitemap query value, or an empty string.
+     */
+    private function sitemap_var_from_request() {
+        $requested = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '';
+        $path = wp_parse_url($requested, PHP_URL_PATH);
+        $path = trim((string) $path, '/');
+
+        if ($path === 'sitemap_index.xml' || $path === 'sitemap.xml' || $path === 'wp-sitemap.xml') {
+            return 'index';
+        }
+        if ($path === 'google-news-sitemap.xml') {
+            return 'newsfeed';
+        }
+        if ($path === 'video-sitemap.xml') {
+            return 'videofeed';
+        }
+        if ($path === 'image-sitemap.xml') {
+            return 'imagefeed';
+        }
+        if (preg_match('/^wp-sitemap-posts-([a-z0-9_-]+)-([0-9]+)\.xml$/', $path, $matches)) {
+            return 'posts-' . $matches[1] . '-' . $matches[2];
+        }
+        if (preg_match('/^wp-sitemap-taxonomies-([a-z0-9_-]+)-([0-9]+)\.xml$/', $path, $matches)) {
+            return 'taxonomies-' . $matches[1] . '-' . $matches[2];
+        }
+        if (preg_match('/^wp-sitemap-users-([0-9]+)\.xml$/', $path, $matches)) {
+            return 'users-' . $matches[1];
+        }
+        if ($path === 'author-sitemap.xml') {
+            return 'users-1';
+        }
+        if (preg_match('/^([a-z0-9_-]+)-sitemap\.xml$/', $path, $matches)) {
+            if (taxonomy_exists($matches[1]) && !post_type_exists($matches[1])) {
+                return 'taxonomies-' . $matches[1] . '-1';
+            }
+            return 'posts-' . $matches[1] . '-1';
+        }
+        return '';
+    }
     
     /**
      * Output sitemap index
@@ -143,6 +219,9 @@ class AISEO_Sitemap {
         
         foreach ($post_types as $post_type) {
             $lastmod = $this->get_post_type_lastmod($post_type);
+            if (!$lastmod) {
+                continue;
+            }
             
             // Use old-style URLs as primary (e.g., post-sitemap.xml, page-sitemap.xml)
             $sitemap_url = home_url("/{$post_type}-sitemap.xml");
@@ -160,6 +239,9 @@ class AISEO_Sitemap {
         
         foreach ($taxonomies as $taxonomy) {
             $lastmod = $this->get_taxonomy_lastmod($taxonomy);
+            if (!$lastmod) {
+                continue;
+            }
             
             // Use old-style URLs (e.g., category-sitemap.xml, post_tag-sitemap.xml)
             $sitemap_url = home_url("/{$taxonomy}-sitemap.xml");
@@ -171,8 +253,233 @@ class AISEO_Sitemap {
             }
             echo "\t</sitemap>\n";
         }
+
+        $robots = class_exists('AISEO_Robots') ? (new AISEO_Robots())->get_settings() : array();
+        if (empty($robots['noindex_author_archives'])) {
+            echo "\t<sitemap>\n";
+            echo "\t\t<loc>" . esc_url(home_url('/author-sitemap.xml')) . "</loc>\n";
+            echo "\t</sitemap>\n";
+        }
+
+        if ($this->news_post_type() !== '') {
+            echo "\t<sitemap>\n";
+            echo "\t\t<loc>" . esc_url(home_url('/google-news-sitemap.xml')) . "</loc>\n";
+            echo "\t</sitemap>\n";
+        }
+        echo "\t<sitemap>\n";
+        echo "\t\t<loc>" . esc_url(home_url('/video-sitemap.xml')) . "</loc>\n";
+        echo "\t</sitemap>\n";
+        echo "\t<sitemap>\n";
+        echo "\t\t<loc>" . esc_url(home_url('/image-sitemap.xml')) . "</loc>\n";
+        echo "\t</sitemap>\n";
         
         echo '</sitemapindex>';
+    }
+
+    /**
+     * Google News sitemap of recent items from the news post type.
+     */
+    private function output_news_sitemap() {
+        header('Content-Type: application/xml; charset=utf-8');
+        header('X-Robots-Tag: noindex, follow');
+
+        $language = get_option('aiseo_news_language', '');
+        if (!is_string($language) || $language === '') {
+            $language = get_bloginfo('language');
+        }
+        if (! is_string($language) || $language === '') {
+            $language = 'en';
+        }
+        $publication = get_option('aiseo_news_publication', '');
+        if (!is_string($publication) || $publication === '') {
+            $publication = wp_strip_all_tags(get_bloginfo('name'));
+        } else {
+            $publication = wp_strip_all_tags($publication);
+        }
+
+        echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+        echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">' . "\n";
+        foreach ($this->get_news_posts() as $post) {
+            $loc = get_permalink($post);
+            if (! is_string($loc) || $loc === '') {
+                continue;
+            }
+            $title = wp_strip_all_tags(get_the_title($post));
+            $published = get_post_time('c', true, $post);
+            echo "\t<url>\n";
+            echo "\t\t<loc>" . esc_url($loc) . "</loc>\n";
+            echo "\t\t<news:news>\n";
+            echo "\t\t\t<news:publication>\n";
+            echo "\t\t\t\t<news:name>" . esc_html($publication) . "</news:name>\n";
+            echo "\t\t\t\t<news:language>" . esc_html($language) . "</news:language>\n";
+            echo "\t\t\t</news:publication>\n";
+            echo "\t\t\t<news:publication_date>" . esc_html($published) . "</news:publication_date>\n";
+            echo "\t\t\t<news:title>" . esc_html($title) . "</news:title>\n";
+            echo "\t\t</news:news>\n";
+            echo "\t</url>\n";
+        }
+        echo '</urlset>';
+    }
+
+    /**
+     * @return string News post type name, or empty.
+     */
+    public function news_post_type() {
+        return post_type_exists('news') ? 'news' : 'post';
+    }
+
+    /**
+     * News items from the last two days (Google News limit).
+     *
+     * @return WP_Post[]
+     */
+    private function get_news_posts() {
+        $types = get_post_types(array('public' => true), 'names');
+        unset($types['attachment']);
+        if (!$types) {
+            return array();
+        }
+        $posts = get_posts(array(
+            'post_type' => array_values($types),
+            'post_status' => 'publish',
+            'posts_per_page' => 200,
+            'orderby' => 'date',
+            'order' => 'DESC',
+            'has_password' => false,
+            'date_query' => array(
+                array(
+                    'after' => '48 hours ago',
+                    'inclusive' => true,
+                ),
+            ),
+        ));
+        $kept = array();
+        foreach ($posts as $post) {
+            $exclude_sitemap = get_post_meta($post->ID, '_aiseo_exclude_sitemap', true);
+            if ($this->post_is_noindex($post->ID) || in_array($exclude_sitemap, array(true, 1, '1'), true)) {
+                continue;
+            }
+            $schema_type = strtolower((string) get_post_meta($post->ID, '_aiseo_schema_type', true));
+            if ($post->post_type !== 'news' && $schema_type !== 'newsarticle') {
+                continue;
+            }
+            $kept[] = $post;
+        }
+        return $kept;
+    }
+
+    /**
+     * Video sitemap for posts that embed YouTube or Vimeo.
+     */
+    private function output_video_sitemap() {
+        header('Content-Type: application/xml; charset=utf-8');
+        header('X-Robots-Tag: noindex, follow');
+        echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+        echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">' . "\n";
+        $schema = class_exists('AISEO_Schema') ? new AISEO_Schema() : null;
+        foreach ($this->get_video_posts() as $post) {
+            $loc = get_permalink($post);
+            $video_url = $schema ? $schema->video_url_for_post($post) : '';
+            if (!is_string($loc) || $loc === '' || $video_url === '') {
+                continue;
+            }
+            $title = wp_strip_all_tags(get_the_title($post));
+            $thumb = get_the_post_thumbnail_url($post, 'full');
+            echo "\t<url>\n";
+            echo "\t\t<loc>" . esc_url($loc) . "</loc>\n";
+            echo "\t\t<video:video>\n";
+            if (is_string($thumb) && $thumb !== '') {
+                echo "\t\t\t<video:thumbnail_loc>" . esc_url($thumb) . "</video:thumbnail_loc>\n";
+            }
+            echo "\t\t\t<video:title>" . esc_html($title) . "</video:title>\n";
+            echo "\t\t\t<video:player_loc>" . esc_url($video_url) . "</video:player_loc>\n";
+            echo "\t\t</video:video>\n";
+            echo "\t</url>\n";
+        }
+        echo '</urlset>';
+    }
+
+    /**
+     * Image sitemap of featured, gallery and in-content images, like Rank Math.
+     */
+    private function output_image_sitemap() {
+        header('Content-Type: application/xml; charset=utf-8');
+        header('X-Robots-Tag: noindex, follow');
+        echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+        echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">' . "\n";
+        $types = $this->get_enabled_post_types();
+        if ($types) {
+            $posts = get_posts(array(
+                'post_type' => $types,
+                'post_status' => 'publish',
+                'posts_per_page' => 200,
+                'orderby' => 'modified',
+                'order' => 'DESC',
+                'has_password' => false,
+                'no_found_rows' => true,
+            ));
+            foreach ($posts as $post) {
+                $exclude_sitemap = get_post_meta($post->ID, '_aiseo_exclude_sitemap', true);
+                if ($this->post_is_noindex($post->ID) || in_array($exclude_sitemap, array(true, 1, '1'), true)) {
+                    continue;
+                }
+                $images = $this->get_post_images($post);
+                if (!$images) {
+                    continue;
+                }
+                $loc = get_permalink($post);
+                if (!is_string($loc) || $loc === '') {
+                    continue;
+                }
+                echo "\t<url>\n";
+                echo "\t\t<loc>" . esc_url($loc) . "</loc>\n";
+                foreach ($images as $image) {
+                    echo "\t\t<image:image>\n";
+                    echo "\t\t\t<image:loc>" . esc_url($image['url']) . "</image:loc>\n";
+                    if (!empty($image['title'])) {
+                        echo "\t\t\t<image:title>" . esc_html($image['title']) . "</image:title>\n";
+                    }
+                    if (!empty($image['caption'])) {
+                        echo "\t\t\t<image:caption>" . esc_html($image['caption']) . "</image:caption>\n";
+                    }
+                    echo "\t\t</image:image>\n";
+                }
+                echo "\t</url>\n";
+            }
+        }
+        echo '</urlset>';
+    }
+
+    /**
+     * @return WP_Post[]
+     */
+    private function get_video_posts() {
+        $types = $this->get_enabled_post_types();
+        if (!$types) {
+            return array();
+        }
+        $posts = get_posts(array(
+            'post_type' => $types,
+            'post_status' => 'publish',
+            'posts_per_page' => 100,
+            'orderby' => 'modified',
+            'order' => 'DESC',
+            'has_password' => false,
+            'no_found_rows' => true,
+        ));
+        $schema = class_exists('AISEO_Schema') ? new AISEO_Schema() : null;
+        $kept = array();
+        foreach ($posts as $post) {
+            $exclude_sitemap = get_post_meta($post->ID, '_aiseo_exclude_sitemap', true);
+            if ($this->post_is_noindex($post->ID) || in_array($exclude_sitemap, array(true, 1, '1'), true)) {
+                continue;
+            }
+            if (!$schema || $schema->video_url_for_post($post) === '') {
+                continue;
+            }
+            $kept[] = $post;
+        }
+        return $kept;
     }
     
     /**
@@ -185,12 +492,30 @@ class AISEO_Sitemap {
             'public' => true,
             'publicly_queryable' => true,
         ), 'names');
-        
-        // Filter out unwanted taxonomies
-        $excluded = array('post_format');
-        $taxonomies = array_diff($taxonomies, $excluded);
-        
-        return apply_filters('aiseo_sitemap_taxonomies', $taxonomies);
+        unset($taxonomies['post_format']);
+        $saved = get_option('aiseo_sitemap_taxonomies', null);
+        if (is_array($saved)) {
+            $taxonomies = array_intersect($taxonomies, $saved);
+        }
+        foreach (array_keys($taxonomies) as $taxonomy) {
+            if ($this->taxonomy_is_noindex($taxonomy)) {
+                unset($taxonomies[$taxonomy]);
+            }
+        }
+        return apply_filters('aiseo_sitemap_taxonomies', array_values($taxonomies));
+    }
+
+    /**
+     * Whether a post is excluded from XML sitemaps by noindex flags.
+     *
+     * @param int $post_id Post ID.
+     * @return bool
+     */
+    private function post_is_noindex($post_id) {
+        if (class_exists('AISEO_Meta')) {
+            return AISEO_Meta::post_is_noindex($post_id);
+        }
+        return in_array(get_post_meta($post_id, '_aiseo_noindex', true), array(true, 1, '1'), true);
     }
     
     /**
@@ -235,6 +560,192 @@ class AISEO_Sitemap {
         }
         
         return null;
+    }
+
+    /**
+     * Output a taxonomy sitemap, excluding terms marked noindex.
+     *
+     * @param string $taxonomy Taxonomy name.
+     * @param int    $page     Page number.
+     */
+    private function output_taxonomy_sitemap($taxonomy, $page = 1) {
+        $cache_key = self::CACHE_KEY . '_tax_' . $taxonomy . '_' . (int) $page;
+        $cached = get_transient($cache_key);
+        if ($cached !== false) {
+            $this->send_sitemap_xml($cached);
+            return;
+        }
+        $xml = $this->generate_taxonomy_sitemap($taxonomy, (int) $page);
+        set_transient($cache_key, $xml, self::CACHE_DURATION);
+        $this->send_sitemap_xml($xml);
+    }
+
+    /**
+     * Output an author sitemap when author archives are indexable.
+     *
+     * @param int $page Page number.
+     */
+    private function output_users_sitemap($page = 1) {
+        $cache_key = self::CACHE_KEY . '_users_' . (int) $page;
+        $cached = get_transient($cache_key);
+        if ($cached !== false) {
+            $this->send_sitemap_xml($cached);
+            return;
+        }
+        $xml = $this->generate_users_sitemap((int) $page);
+        set_transient($cache_key, $xml, self::CACHE_DURATION);
+        $this->send_sitemap_xml($xml);
+    }
+
+    /**
+     * @param string $taxonomy Taxonomy name.
+     * @param int    $page     Page number.
+     * @return string
+     */
+    private function generate_taxonomy_sitemap($taxonomy, $page) {
+        $xml = $this->urlset_open();
+        if ($page === 1 && taxonomy_exists($taxonomy) && !$this->taxonomy_is_noindex($taxonomy)) {
+            $terms = get_terms(array(
+                'taxonomy' => $taxonomy,
+                'hide_empty' => true,
+            ));
+            if (!is_wp_error($terms)) {
+                foreach ($terms as $term) {
+                    if ($this->term_is_noindex($term)) {
+                        continue;
+                    }
+                    $link = get_term_link($term);
+                    if (is_wp_error($link)) {
+                        continue;
+                    }
+                    $lastmod = $this->latest_modified_gmt(array(
+                        'tax_query' => array(
+                            array(
+                                'taxonomy' => $term->taxonomy,
+                                'field' => 'term_id',
+                                'terms' => array((int) $term->term_id),
+                            ),
+                        ),
+                    ));
+                    $xml .= $this->sitemap_url_entry($link, $lastmod);
+                }
+            }
+        }
+        return $xml . '</urlset>';
+    }
+
+    /**
+     * @param int $page Page number.
+     * @return string
+     */
+    private function generate_users_sitemap($page) {
+        $xml = $this->urlset_open();
+        $robots = class_exists('AISEO_Robots') ? (new AISEO_Robots())->get_settings() : array();
+        if ($page === 1 && empty($robots['noindex_author_archives'])) {
+            $author_types = array('post');
+            if (post_type_exists('product')) {
+                $author_types[] = 'product';
+            }
+            $users = get_users(array(
+                'has_published_posts' => $author_types,
+                'fields' => array('ID'),
+            ));
+            foreach ($users as $user) {
+                if (in_array(get_user_meta((int) $user->ID, '_aiseo_noindex', true), array(true, 1, '1'), true)) {
+                    continue;
+                }
+                $lastmod = $this->latest_modified_gmt(array(
+                    'author' => (int) $user->ID,
+                ));
+                $xml .= $this->sitemap_url_entry(get_author_posts_url($user->ID), $lastmod);
+            }
+        }
+        return $xml . '</urlset>';
+    }
+
+    /**
+     * @param string $taxonomy Taxonomy name.
+     * @return bool
+     */
+    private function taxonomy_is_noindex($taxonomy) {
+        if (!class_exists('AISEO_Robots')) {
+            return false;
+        }
+        $settings = (new AISEO_Robots())->get_settings();
+        if ($taxonomy === 'category') {
+            return !empty($settings['noindex_categories']);
+        }
+        if ($taxonomy === 'post_tag') {
+            return !empty($settings['noindex_tags']);
+        }
+        return false;
+    }
+
+    /**
+     * @param WP_Term $term Term object.
+     * @return bool
+     */
+    private function term_is_noindex($term) {
+        if (!class_exists('AISEO_Taxonomy_SEO')) {
+            return false;
+        }
+        $meta = (new AISEO_Taxonomy_SEO())->get_term_meta($term->term_id, $term->taxonomy);
+        return !empty($meta['noindex']);
+    }
+
+    /**
+     * @return string
+     */
+    /**
+     * Latest published post modification time in GMT.
+     *
+     * @param array $query_args Extra query arguments.
+     * @return string ISO 8601 time, or an empty string.
+     */
+    private function latest_modified_gmt($query_args) {
+        $posts = get_posts(array_merge(array(
+            'post_type' => 'post',
+            'post_status' => 'publish',
+            'posts_per_page' => 1,
+            'orderby' => 'modified',
+            'order' => 'DESC',
+            'no_found_rows' => true,
+            'fields' => 'ids',
+        ), $query_args));
+        if (!$posts) {
+            return '';
+        }
+        $modified = get_post_modified_time('c', true, $posts[0]);
+        return is_string($modified) ? $modified : '';
+    }
+
+    /**
+     * @param string $loc     Public URL.
+     * @param string $lastmod ISO 8601 time.
+     * @return string
+     */
+    private function sitemap_url_entry($loc, $lastmod) {
+        $xml = "\t<url>\n\t\t<loc>" . esc_url($loc) . "</loc>\n";
+        if ($lastmod !== '') {
+            $xml .= "\t\t<lastmod>" . esc_html($lastmod) . "</lastmod>\n";
+        }
+        return $xml . "\t</url>\n";
+    }
+
+    private function urlset_open() {
+        $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+        $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+        return $xml;
+    }
+
+    /**
+     * @param string $xml Sitemap document.
+     */
+    private function send_sitemap_xml($xml) {
+        header('Content-Type: application/xml; charset=utf-8');
+        header('X-Robots-Tag: noindex, follow');
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- XML sitemap output with proper content-type header
+        echo $xml;
     }
     
     /**
@@ -350,23 +861,63 @@ class AISEO_Sitemap {
             'orderby' => 'modified',
             'order' => 'DESC',
             'no_found_rows' => true,
+            'has_password' => false,
             'update_post_meta_cache' => false,
             'update_post_term_cache' => false,
         );
         
-        // Exclude noindex posts
+        // Exclude posts marked noindex or explicitly removed from the sitemap.
         // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Necessary for sitemap generation, results are cached
         $args['meta_query'] = array(
-            'relation' => 'OR',
+            'relation' => 'AND',
             array(
-                'key' => '_aiseo_noindex',
-                'compare' => 'NOT EXISTS',
+                'relation' => 'OR',
+                array(
+                    'key' => '_aiseo_noindex',
+                    'compare' => 'NOT EXISTS',
+                ),
+                array(
+                    'key' => '_aiseo_noindex',
+                    'value' => array('1', 'true'),
+                    'compare' => 'NOT IN',
+                ),
             ),
             array(
-                'key' => '_aiseo_noindex',
-                'value' => '0',
+                'relation' => 'OR',
+                array(
+                    'key' => '_aiseo_exclude_sitemap',
+                    'compare' => 'NOT EXISTS',
+                ),
+                array(
+                    'key' => '_aiseo_exclude_sitemap',
+                    'value' => array('1', 'true'),
+                    'compare' => 'NOT IN',
+                ),
             ),
         );
+
+        if ($post_type === 'page' && function_exists('wc_get_page_id')) {
+            $exclude = array();
+            foreach (array('cart', 'checkout', 'myaccount') as $wc_page) {
+                $page_id = wc_get_page_id($wc_page);
+                if ($page_id > 0) {
+                    $exclude[] = $page_id;
+                }
+            }
+            if ($exclude) {
+                $args['post__not_in'] = $exclude;
+            }
+        }
+        if ($post_type === 'product' && taxonomy_exists('product_visibility')) {
+            $args['tax_query'] = array(
+                array(
+                    'taxonomy' => 'product_visibility',
+                    'field' => 'name',
+                    'terms' => array('exclude-from-catalog'),
+                    'operator' => 'NOT IN',
+                ),
+            );
+        }
         
         $query = new WP_Query($args);
         
@@ -414,6 +965,10 @@ class AISEO_Sitemap {
         if (!empty($custom)) {
             return $custom;
         }
+
+        if (get_post_meta($post->ID, '_aiseo_cornerstone', true) === '1') {
+            return '0.9';
+        }
         
         // Calculate based on post type and homepage
         if ($post->post_type === 'page') {
@@ -441,39 +996,90 @@ class AISEO_Sitemap {
      */
     private function get_post_images($post) {
         $images = array();
-        
-        // Featured image
+        $seen = array();
+        $add = function ($url, $title, $caption) use (&$images, &$seen) {
+            if (count($images) >= 5) {
+                return;
+            }
+            $url = $this->absolute_image_url($url);
+            if ($url === '' || isset($seen[$url])) {
+                return;
+            }
+            $seen[$url] = true;
+            $images[] = array(
+                'url' => $url,
+                'title' => is_string($title) ? $title : '',
+                'caption' => is_string($caption) ? $caption : '',
+            );
+        };
+
         $thumbnail_id = get_post_thumbnail_id($post->ID);
         if ($thumbnail_id) {
-            $image_url = wp_get_attachment_image_url($thumbnail_id, 'full');
-            $image_title = get_the_title($thumbnail_id);
-            $image_caption = wp_get_attachment_caption($thumbnail_id);
-            
-            if ($image_url) {
-                $images[] = array(
-                    'url' => $image_url,
-                    'title' => $image_title,
-                    'caption' => $image_caption,
-                );
+            $caption = wp_get_attachment_caption($thumbnail_id);
+            if (!is_string($caption) || $caption === '') {
+                $alt = get_post_meta($thumbnail_id, '_wp_attachment_image_alt', true);
+                $caption = is_string($alt) ? $alt : '';
             }
+            $add(wp_get_attachment_image_url($thumbnail_id, 'full'), get_the_title($thumbnail_id), $caption);
         }
-        
-        // Images from content (limit to 5 total)
-        if (count($images) < 5) {
-            preg_match_all('/<img[^>]+src=["\']([^"\']+)["\'][^>]*>/i', $post->post_content, $matches);
-            
-            if (!empty($matches[1])) {
-                foreach (array_slice($matches[1], 0, 5 - count($images)) as $img_url) {
-                    $images[] = array(
-                        'url' => $img_url,
-                        'title' => '',
-                        'caption' => '',
-                    );
+
+        if ($post->post_type === 'product' && function_exists('wc_get_product')) {
+            $product = wc_get_product($post->ID);
+            if ($product && method_exists($product, 'get_gallery_image_ids')) {
+                foreach ($product->get_gallery_image_ids() as $gallery_id) {
+                    $gallery_id = (int) $gallery_id;
+                    if ($gallery_id < 1) {
+                        continue;
+                    }
+                    $caption = wp_get_attachment_caption($gallery_id);
+                    if (!is_string($caption) || $caption === '') {
+                        $alt = get_post_meta($gallery_id, '_wp_attachment_image_alt', true);
+                        $caption = is_string($alt) ? $alt : '';
+                    }
+                    $add(wp_get_attachment_image_url($gallery_id, 'full'), get_the_title($gallery_id), $caption);
                 }
             }
         }
-        
+
+        if (preg_match_all('/<img\b[^>]*>/i', $post->post_content, $tags)) {
+            foreach ($tags[0] as $tag) {
+                if (!preg_match('/\bsrc=["\']([^"\']+)["\']/i', $tag, $src)) {
+                    continue;
+                }
+                $alt = '';
+                if (preg_match('/\balt=["\']([^"\']*)["\']/i', $tag, $alt_match)) {
+                    $alt = $alt_match[1];
+                }
+                $add($src[1], '', $alt);
+            }
+        }
+
         return $images;
+    }
+
+    /**
+     * Accept only a normal image address, and make a root-relative one absolute.
+     *
+     * @param string $url Image address.
+     * @return string
+     */
+    private function absolute_image_url($url) {
+        if (!is_string($url)) {
+            return '';
+        }
+        $url = trim($url);
+        if ($url === '' || stripos($url, 'data:') === 0 || stripos($url, 'javascript:') === 0) {
+            return '';
+        }
+        if (strpos($url, '//') === 0) {
+            $url = 'https:' . $url;
+        } elseif (isset($url[0]) && $url[0] === '/') {
+            $url = home_url($url);
+        } elseif (!preg_match('#^https?://#i', $url)) {
+            return '';
+        }
+        $safe = esc_url_raw($url);
+        return is_string($safe) ? $safe : '';
     }
     
     /**
@@ -481,14 +1087,29 @@ class AISEO_Sitemap {
      *
      * @return array Post types
      */
-    private function get_enabled_post_types() {
-        $default_types = array('post', 'page');
-        $enabled_types = get_option('aiseo_sitemap_post_types', $default_types);
-        
-        // Filter out non-public post types
-        $public_types = get_post_types(array('public' => true));
-        
-        return array_intersect($enabled_types, $public_types);
+    public function get_enabled_post_types() {
+        $public_types = get_post_types(array('public' => true), 'names');
+        unset($public_types['attachment']);
+        $saved = get_option('aiseo_sitemap_post_types', null);
+        if (!is_array($saved)) {
+            $saved = $public_types;
+        }
+        return array_values(array_intersect($saved, $public_types));
+    }
+
+    /**
+     * Public post types that have at least one published item.
+     *
+     * @return array
+     */
+    public function get_populated_post_types() {
+        $types = array();
+        foreach ($this->get_enabled_post_types() as $post_type) {
+            if ($this->get_post_type_lastmod($post_type)) {
+                $types[] = $post_type;
+            }
+        }
+        return $types;
     }
     
     /**
@@ -525,7 +1146,12 @@ class AISEO_Sitemap {
         
         foreach ($post_types as $post_type) {
             delete_transient(self::CACHE_KEY . '_' . $post_type);
+            delete_transient(self::CACHE_KEY . '_' . $post_type . '_1');
         }
+        foreach ($this->get_enabled_taxonomies() as $taxonomy) {
+            delete_transient(self::CACHE_KEY . '_tax_' . $taxonomy . '_1');
+        }
+        delete_transient(self::CACHE_KEY . '_users_1');
     }
     
     /**

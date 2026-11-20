@@ -60,7 +60,7 @@
                 url: aiseoImageSeo.ajaxUrl,
                 type: 'POST',
                 data: {
-                    action: 'aiseo_generate_single_alt',
+                    action: 'aiseo_image_generate_alt',
                     nonce: aiseoImageSeo.nonce,
                     image_id: imageId,
                     overwrite: false
@@ -157,7 +157,7 @@
                 url: aiseoImageSeo.ajaxUrl,
                 type: 'POST',
                 data: {
-                    action: 'aiseo_generate_single_alt',
+                    action: 'aiseo_image_generate_alt',
                     nonce: aiseoImageSeo.nonce,
                     image_id: imageId,
                     overwrite: false

@@ -28,8 +28,8 @@ class AISEO_Analytics {
      * Initialize analytics
      */
     public function init() {
-        // Output tracking code in head
-        add_action('wp_head', array($this, 'output_tracking_code'), 1);
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_tracking_code'), 1);
+        add_filter('script_loader_tag', array($this, 'async_tracking_script'), 10, 3);
     }
     
     /**
@@ -153,72 +153,76 @@ class AISEO_Analytics {
     }
     
     /**
-     * Output tracking code
+     * Enqueue Google Analytics scripts.
      */
-    public function output_tracking_code() {
+    public function enqueue_tracking_code() {
         if (!$this->should_track()) {
             return;
         }
-        
+
         $settings = $this->get_settings();
         $tracking_id = $settings['tracking_id'];
-        
+
         if ($this->is_ga4($tracking_id)) {
-            $this->output_ga4_code($tracking_id, $settings);
+            $this->enqueue_ga4_code($tracking_id, $settings);
         } elseif ($this->is_universal($tracking_id)) {
-            $this->output_universal_code($tracking_id, $settings);
+            $this->enqueue_universal_code($tracking_id, $settings);
         }
     }
-    
+
     /**
-     * Output GA4 tracking code
+     * Mark tracking scripts as async.
      *
-     * @param string $tracking_id Tracking ID
-     * @param array $settings Settings
+     * @param string $tag    Script tag.
+     * @param string $handle Script handle.
+     * @param string $src    Script URL.
+     * @return string
      */
-    private function output_ga4_code($tracking_id, $settings) {
-        ?>
-<!-- Google Analytics (GA4) - AISEO -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo esc_attr($tracking_id); ?>"></script>
-<script>
-window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', '<?php echo esc_js($tracking_id); ?>'<?php 
-    $config = array();
-    if ($settings['anonymize_ip']) {
-        $config['anonymize_ip'] = true;
+    public function async_tracking_script($tag, $handle, $src) {
+        unset($src);
+        if ($handle !== 'aiseo-gtag' && $handle !== 'aiseo-ga-ua') {
+            return $tag;
+        }
+        if (strpos($tag, ' async') !== false) {
+            return $tag;
+        }
+        return str_replace(' src=', ' async src=', $tag);
     }
-    if (!empty($config)) {
-        echo ', ' . wp_json_encode($config);
-    }
-?>);
-</script>
-<!-- End Google Analytics -->
-        <?php
-    }
-    
+
     /**
-     * Output Universal Analytics tracking code
+     * Enqueue GA4 tracking.
      *
-     * @param string $tracking_id Tracking ID
-     * @param array $settings Settings
+     * @param string $tracking_id Tracking ID.
+     * @param array  $settings    Settings.
      */
-    private function output_universal_code($tracking_id, $settings) {
-        ?>
-<!-- Google Analytics (Universal) - AISEO -->
-<script>
-(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
-(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
-m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
-})(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
-ga('create', '<?php echo esc_js($tracking_id); ?>', 'auto');
-<?php if ($settings['anonymize_ip']) : ?>
-ga('set', 'anonymizeIp', true);
-<?php endif; ?>
-ga('send', 'pageview');
-</script>
-<!-- End Google Analytics -->
-        <?php
+    private function enqueue_ga4_code($tracking_id, $settings) {
+        $src = 'https://www.googletagmanager.com/gtag/js?id=' . rawurlencode($tracking_id);
+        wp_enqueue_script('aiseo-gtag', $src, array(), null, false);
+        $config = array();
+        if (!empty($settings['anonymize_ip'])) {
+            $config['anonymize_ip'] = true;
+        }
+        $inline = "window.dataLayer = window.dataLayer || [];\nfunction gtag(){dataLayer.push(arguments);}\ngtag('js', new Date());\ngtag('config', " . wp_json_encode($tracking_id);
+        if ($config) {
+            $inline .= ', ' . wp_json_encode($config);
+        }
+        $inline .= ');';
+        wp_add_inline_script('aiseo-gtag', $inline);
+    }
+
+    /**
+     * Enqueue Universal Analytics tracking.
+     *
+     * @param string $tracking_id Tracking ID.
+     * @param array  $settings    Settings.
+     */
+    private function enqueue_universal_code($tracking_id, $settings) {
+        wp_enqueue_script('aiseo-ga-ua', 'https://www.google-analytics.com/analytics.js', array(), null, false);
+        $inline = "window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date();ga('create', " . wp_json_encode($tracking_id) . ", 'auto');";
+        if (!empty($settings['anonymize_ip'])) {
+            $inline .= "ga('set', 'anonymizeIp', true);";
+        }
+        $inline .= "ga('send', 'pageview');";
+        wp_add_inline_script('aiseo-ga-ua', $inline);
     }
 }

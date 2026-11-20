@@ -237,9 +237,9 @@ For each topic, provide:
 2. Why it's trending
 3. Content angle suggestions
 4. Target audience
-5. Estimated search volume (high/medium/low)
+5. Editorial interest band (high/medium/low). Do not invent search volume, CPC, or ranking positions.
 
-Format as JSON array with keys: topic, reason, angles (array), audience, volume";
+Format as JSON array with keys: topic, reason, angles (array), audience, interest";
         
         // Call OpenAI API
         $api = new AISEO_API();
@@ -448,6 +448,16 @@ Format as JSON array with keys: topic, priority, reason, traffic_potential";
         if (preg_match('/\[[\s\S]*\]/', $response, $json_match)) {
             $topics = json_decode($json_match[0], true);
             if (is_array($topics)) {
+                foreach ($topics as &$topic) {
+                    if (!is_array($topic)) {
+                        continue;
+                    }
+                    unset($topic['search_volume'], $topic['volume'], $topic['cpc']);
+                    if (empty($topic['interest'])) {
+                        $topic['interest'] = 'medium';
+                    }
+                }
+                unset($topic);
                 return $topics;
             }
         }
@@ -570,14 +580,20 @@ Format as JSON array with keys: topic, priority, reason, traffic_potential";
         
         if ($type === 'all') {
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Clearing transients
-            $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_aiseo_content_%'");
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Clearing transients
-            $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_timeout_aiseo_content_%'");
+            $wpdb->query($wpdb->prepare(
+                "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                $wpdb->esc_like('_transient_aiseo_content_') . '%'
+            ));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Clearing transients
+            $wpdb->query($wpdb->prepare(
+                "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                $wpdb->esc_like('_transient_timeout_aiseo_content_') . '%'
+            ));
         } else {
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Clearing transients
             $wpdb->query($wpdb->prepare(
                 "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
-                '_transient_aiseo_content_' . $type . '_%'
+                $wpdb->esc_like('_transient_aiseo_content_' . $type . '_') . '%'
             ));
         }
     }

@@ -523,6 +523,7 @@ class AISEO_API {
                         continue 2; // Continue outer loop
                     }
                     
+                    /* translators: %s: text. */
                     return new WP_Error('missing_field', sprintf(__('Required field "%s" is missing', 'aiseo'), $field));
                 }
             }
@@ -839,7 +840,7 @@ class AISEO_API {
      */
     private function prepare_image_for_vision($image_url) {
         // Check if URL is local or inaccessible
-        $parsed_url = parse_url($image_url);
+        $parsed_url = wp_parse_url($image_url);
         $is_local = false;
         
         if (isset($parsed_url['host'])) {
@@ -869,6 +870,7 @@ class AISEO_API {
             }
             
             // Read file and encode to base64
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_get_contents -- Local media file for vision encoding.
             $image_data = file_get_contents($file_path);
             if ($image_data === false) {
                 return new WP_Error('file_read_error', __('Failed to read image file', 'aiseo'));
@@ -970,6 +972,7 @@ class AISEO_API {
         if ($user_requests >= $rate_limit_per_minute) {
             $wait_seconds = 60 - (time() - (int)get_transient('aiseo_user_requests_start_' . $user_id));
             $wait_seconds = max(1, $wait_seconds);
+            /* translators: %d: number. */
             return new WP_Error('rate_limit', sprintf(__('Rate limit exceeded. Please wait %d seconds and try again.', 'aiseo'), $wait_seconds));
         }
         
@@ -1047,6 +1050,7 @@ class AISEO_API {
             case 504:
                 return __('OpenAI service temporarily unavailable', 'aiseo');
             default:
+                /* translators: %d: number. */
                 return sprintf(__('API error: %d', 'aiseo'), $status_code);
         }
     }

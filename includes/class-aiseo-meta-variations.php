@@ -22,6 +22,41 @@ class AISEO_Meta_Variations {
     }
     
     /**
+     * Title options derived from the post, the focus keyword, and the site name.
+     *
+     * @param WP_Post $post    Post.
+     * @param string  $keyword Focus keyword.
+     * @return array
+     */
+    public function title_options($post, $keyword = '') {
+        $title = trim($post->post_title);
+        $keyword = trim($keyword);
+        $site = trim(get_bloginfo('name'));
+        $candidates = array();
+        if ($title !== '') {
+            $candidates[] = $title;
+        }
+        if ($keyword !== '' && stripos($title, $keyword) === false) {
+            $candidates[] = $keyword . ': ' . $title;
+        }
+        if ($site !== '' && stripos($title, $site) === false) {
+            $candidates[] = $title . ' | ' . $site;
+        }
+        $options = array();
+        foreach (array_unique($candidates) as $text) {
+            $text = trim($text);
+            if ($text === '') {
+                continue;
+            }
+            $options[] = array(
+                'text' => $text,
+                'length' => strlen($text),
+            );
+        }
+        return $options;
+    }
+
+    /**
      * Generate meta description variations
      *
      * @param string $content Post content

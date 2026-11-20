@@ -31,6 +31,7 @@ class AISEO_Breadcrumbs {
         'show_current' => true,
         'bold_current' => true,
         'show_on_home' => false,
+        'show_in_content' => false,
         'wrapper_class' => 'aiseo-breadcrumbs',
         'schema_enabled' => true,
     );
@@ -38,12 +39,146 @@ class AISEO_Breadcrumbs {
     /**
      * Initialize breadcrumbs
      */
+    /**
+     * Category used for breadcrumbs and schema.
+     * A saved primary category is used only when the post is actually in it.
+     *
+     * @param int $post_id Post ID.
+     * @return WP_Term|null
+     */
+    public static function primary_category($post_id = 0) {
+        $post_id = $post_id ? (int) $post_id : (int) get_the_ID();
+        if (!$post_id) {
+            return null;
+        }
+        $categories = get_the_category($post_id);
+        if (empty($categories) || is_wp_error($categories)) {
+            return null;
+        }
+        $primary_id = (int) get_post_meta($post_id, '_aiseo_primary_category', true);
+        if ($primary_id) {
+            foreach ($categories as $category) {
+                if ((int) $category->term_id === $primary_id) {
+                    return $category;
+                }
+            }
+        }
+        return $categories[0];
+    }
+
+    /**
+     * Title used in the breadcrumb trail for a post.
+     *
+     * @param int|WP_Post $post Post ID or object.
+     * @return string
+     */
+    public static function post_title($post = 0) {
+        $post_id = $post instanceof WP_Post ? (int) $post->ID : (int) $post;
+        if (!$post_id) {
+            $post_id = (int) get_the_ID();
+        }
+        $custom = $post_id ? get_post_meta($post_id, '_aiseo_breadcrumb_title', true) : '';
+        if (is_string($custom) && $custom !== '') {
+            return $custom;
+        }
+        return get_the_title($post_id);
+    }
+
     public function init() {
-        // Register shortcode
         add_shortcode('aiseo_breadcrumbs', array($this, 'shortcode'));
-        
-        // Add action hook for theme integration
         add_action('aiseo_breadcrumbs', array($this, 'display'));
+        add_filter('the_content', array($this, 'prepend_to_content'), 12);
+        add_action('init', array($this, 'register_block'));
+        add_action('enqueue_block_editor_assets', array($this, 'enqueue_block_editor'));
+    }
+
+    /**
+     * Gutenberg block, matching Yoast and Rank Math breadcrumb blocks.
+     */
+    public function register_block() {
+        if (!function_exists('register_block_type')) {
+            return;
+        }
+        register_block_type('aiseo/breadcrumbs', array(
+            'api_version' => 2,
+            'title' => __('AISEO Breadcrumbs', 'aiseo'),
+            'description' => __('Breadcrumb trail for the current page.', 'aiseo'),
+            'category' => 'widgets',
+            'icon' => 'arrow-right-alt',
+            'attributes' => array(
+                'separator' => array(
+                    'type' => 'string',
+                    'default' => '',
+                ),
+                'homeText' => array(
+                    'type' => 'string',
+                    'default' => '',
+                ),
+            ),
+            'render_callback' => array($this, 'render_block'),
+        ));
+    }
+
+    /**
+     * Editor script for the breadcrumbs block.
+     */
+    public function enqueue_block_editor() {
+        wp_enqueue_script(
+            'aiseo-breadcrumbs-block',
+            AISEO_PLUGIN_URL . 'admin/js/aiseo-breadcrumbs-block.js',
+            array('wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-server-side-render', 'wp-i18n'),
+            AISEO_VERSION,
+            true
+        );
+        wp_localize_script('aiseo-breadcrumbs-block', 'aiseoBreadcrumbsBlock', array(
+            'i18n' => array(
+                'title' => __('AISEO Breadcrumbs', 'aiseo'),
+                'description' => __('Breadcrumb trail for the current page.', 'aiseo'),
+                'settings' => __('Breadcrumb settings', 'aiseo'),
+                'separator' => __('Separator', 'aiseo'),
+                'home' => __('Home label', 'aiseo'),
+                'placeholder' => __('Breadcrumb trail', 'aiseo'),
+            ),
+        ));
+    }
+
+    /**
+     * @param array $attributes Block attributes.
+     * @return string
+     */
+    public function render_block($attributes) {
+        $args = array();
+        if (!empty($attributes['separator']) && is_string($attributes['separator'])) {
+            $args['separator'] = sanitize_text_field($attributes['separator']);
+        }
+        if (!empty($attributes['homeText']) && is_string($attributes['homeText'])) {
+            $args['home_text'] = sanitize_text_field($attributes['homeText']);
+        }
+        return $this->render($args);
+    }
+
+    /**
+     * Print the trail at the start of a singular post when the setting is on.
+     *
+     * @param string $content Post content.
+     * @return string
+     */
+    public function prepend_to_content($content) {
+        if (!is_string($content) || !is_singular() || is_feed() || !in_the_loop() || !is_main_query()) {
+            return $content;
+        }
+        $settings = $this->get_settings();
+        if (empty($settings['show_in_content']) || empty($settings['enabled'])) {
+            return $content;
+        }
+        if (strpos($content, 'aiseo-breadcrumbs') !== false || strpos($content, '[aiseo_breadcrumbs') !== false) {
+            return $content;
+        }
+        $html = $this->render();
+        if ($html === '') {
+            return $content;
+        }
+        return $html . $content;
     }
     
     /**
@@ -100,7 +235,7 @@ class AISEO_Breadcrumbs {
      * @param array $args Optional arguments
      */
     public function display($args = array()) {
-        echo $this->render($args);
+        echo $this->render($args); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- render() escapes crumb text and URLs.
     }
     
     /**
@@ -184,10 +319,8 @@ class AISEO_Breadcrumbs {
         
         // Single post
         if (is_singular('post')) {
-            // Categories
-            $categories = get_the_category();
-            if (!empty($categories)) {
-                $category = $categories[0];
+            $category = self::primary_category(get_queried_object_id());
+            if ($category) {
                 
                 // Parent categories
                 $parents = get_ancestors($category->term_id, 'category');
@@ -211,7 +344,7 @@ class AISEO_Breadcrumbs {
             
             // Current post
             $breadcrumbs[] = array(
-                'title' => get_the_title(),
+                'title' => self::post_title(),
                 'url' => get_permalink(),
                 'current' => true,
             );
@@ -230,7 +363,7 @@ class AISEO_Breadcrumbs {
                 
                 foreach ($parents as $parent_id) {
                     $breadcrumbs[] = array(
-                        'title' => get_the_title($parent_id),
+                        'title' => self::post_title($parent_id),
                         'url' => get_permalink($parent_id),
                         'current' => false,
                     );
@@ -239,11 +372,127 @@ class AISEO_Breadcrumbs {
             
             // Current page
             $breadcrumbs[] = array(
-                'title' => get_the_title(),
+                'title' => self::post_title(),
                 'url' => get_permalink(),
                 'current' => true,
             );
             
+            return $breadcrumbs;
+        }
+
+        if (function_exists('is_product') && is_product()) {
+            if (function_exists('wc_get_page_id')) {
+                $shop_id = wc_get_page_id('shop');
+                if ($shop_id > 0) {
+                    $breadcrumbs[] = array(
+                        'title' => get_the_title($shop_id),
+                        'url' => get_permalink($shop_id),
+                        'current' => false,
+                    );
+                }
+            }
+            $product_id = get_queried_object_id();
+            $terms = array();
+            if ($product_id && function_exists('wc_get_product_terms')) {
+                $terms = wc_get_product_terms($product_id, 'product_cat', array(
+                    'orderby' => 'parent',
+                    'order' => 'DESC',
+                ));
+            }
+            if (is_wp_error($terms) || !is_array($terms)) {
+                $terms = array();
+            }
+            $term = $terms ? $terms[0] : null;
+            if ($term instanceof WP_Term) {
+                $parents = array_reverse(get_ancestors($term->term_id, 'product_cat'));
+                foreach ($parents as $parent_id) {
+                    $parent = get_term($parent_id, 'product_cat');
+                    if ($parent instanceof WP_Term && !is_wp_error($parent)) {
+                        $breadcrumbs[] = array(
+                            'title' => $parent->name,
+                            'url' => get_term_link($parent),
+                            'current' => false,
+                        );
+                    }
+                }
+                $breadcrumbs[] = array(
+                    'title' => $term->name,
+                    'url' => get_term_link($term),
+                    'current' => false,
+                );
+            }
+            $breadcrumbs[] = array(
+                'title' => self::post_title(),
+                'url' => get_permalink(),
+                'current' => true,
+            );
+            return $breadcrumbs;
+        }
+
+        if (function_exists('is_shop') && is_shop()) {
+            $shop_id = function_exists('wc_get_page_id') ? wc_get_page_id('shop') : 0;
+            $breadcrumbs[] = array(
+                'title' => $shop_id > 0 ? get_the_title($shop_id) : __('Shop', 'aiseo'),
+                'url' => $shop_id > 0 ? get_permalink($shop_id) : '',
+                'current' => true,
+            );
+            return $breadcrumbs;
+        }
+
+        if (function_exists('is_product_category') && is_product_category()) {
+            if (function_exists('wc_get_page_id')) {
+                $shop_id = wc_get_page_id('shop');
+                if ($shop_id > 0) {
+                    $breadcrumbs[] = array(
+                        'title' => get_the_title($shop_id),
+                        'url' => get_permalink($shop_id),
+                        'current' => false,
+                    );
+                }
+            }
+            $category = get_queried_object();
+            if ($category instanceof WP_Term) {
+                $parents = array_reverse(get_ancestors($category->term_id, 'product_cat'));
+                foreach ($parents as $parent_id) {
+                    $parent = get_term($parent_id, 'product_cat');
+                    if ($parent instanceof WP_Term && !is_wp_error($parent)) {
+                        $breadcrumbs[] = array(
+                            'title' => $parent->name,
+                            'url' => get_term_link($parent),
+                            'current' => false,
+                        );
+                    }
+                }
+                $breadcrumbs[] = array(
+                    'title' => $category->name,
+                    'url' => get_term_link($category),
+                    'current' => true,
+                );
+            }
+            return $breadcrumbs;
+        }
+
+        // Other public singular types, such as a custom post type.
+        if (is_singular()) {
+            $post = get_queried_object();
+            if ($post instanceof WP_Post) {
+                $post_type = get_post_type_object($post->post_type);
+                if ($post_type && !empty($post_type->has_archive)) {
+                    $archive = get_post_type_archive_link($post->post_type);
+                    if ($archive) {
+                        $breadcrumbs[] = array(
+                            'title' => $post_type->labels->name,
+                            'url' => $archive,
+                            'current' => false,
+                        );
+                    }
+                }
+                $breadcrumbs[] = array(
+                    'title' => self::post_title($post),
+                    'url' => get_permalink($post),
+                    'current' => true,
+                );
+            }
             return $breadcrumbs;
         }
         
@@ -340,6 +589,7 @@ class AISEO_Breadcrumbs {
         // Search
         if (is_search()) {
             $breadcrumbs[] = array(
+                /* translators: %s: text. */
                 'title' => sprintf(__('Search: %s', 'aiseo'), get_search_query()),
                 'url' => '',
                 'current' => true,
@@ -373,7 +623,7 @@ class AISEO_Breadcrumbs {
             }
             
             $breadcrumbs[] = array(
-                'title' => get_the_title(),
+                'title' => self::post_title(),
                 'url' => get_permalink(),
                 'current' => true,
             );
@@ -433,72 +683,33 @@ class AISEO_Breadcrumbs {
      * @return string HTML
      */
     private function generate_html($breadcrumbs, $separator, $wrapper_class, $settings) {
-        $html = '<nav class="' . esc_attr($wrapper_class) . '" aria-label="' . esc_attr__('Breadcrumb', 'aiseo') . '">';
-        
-        // Schema markup
-        if ($settings['schema_enabled']) {
-            $html .= '<ol itemscope itemtype="https://schema.org/BreadcrumbList">';
-        } else {
-            $html .= '<ol>';
-        }
-        
+        $html = '<nav class="' . esc_attr($wrapper_class) . '" aria-label="' . esc_attr__('Breadcrumb', 'aiseo') . '"><ol>';
         $count = count($breadcrumbs);
-        $position = 1;
-        
+
         foreach ($breadcrumbs as $index => $crumb) {
             $is_last = ($index === $count - 1);
-            
-            // Skip current item if disabled
             if ($is_last && !$settings['show_current']) {
                 continue;
             }
-            
-            if ($settings['schema_enabled']) {
-                $html .= '<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">';
-            } else {
-                $html .= '<li>';
-            }
-            
-            // Link or span
+
+            $html .= '<li>';
             if (!empty($crumb['url']) && !$crumb['current']) {
-                if ($settings['schema_enabled']) {
-                    $html .= '<a itemprop="item" href="' . esc_url($crumb['url']) . '">';
-                    $html .= '<span itemprop="name">' . esc_html($crumb['title']) . '</span>';
-                    $html .= '</a>';
-                } else {
-                    $html .= '<a href="' . esc_url($crumb['url']) . '">' . esc_html($crumb['title']) . '</a>';
-                }
+                $html .= '<a href="' . esc_url($crumb['url']) . '">' . esc_html($crumb['title']) . '</a>';
             } else {
                 $title = esc_html($crumb['title']);
                 if ($settings['bold_current'] && $crumb['current']) {
                     $title = '<strong>' . $title . '</strong>';
                 }
-                
-                if ($settings['schema_enabled']) {
-                    $html .= '<span itemprop="name">' . $title . '</span>';
-                } else {
-                    $html .= '<span>' . $title . '</span>';
-                }
+                $html .= '<span>' . $title . '</span>';
             }
-            
-            // Schema position
-            if ($settings['schema_enabled']) {
-                $html .= '<meta itemprop="position" content="' . $position . '">';
-            }
-            
             $html .= '</li>';
-            
-            // Separator
+
             if (!$is_last) {
                 $html .= '<li class="separator" aria-hidden="true">' . esc_html($separator) . '</li>';
             }
-            
-            $position++;
         }
-        
-        $html .= '</ol>';
-        $html .= '</nav>';
-        
+
+        $html .= '</ol></nav>';
         return $html;
     }
     

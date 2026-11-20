@@ -3,7 +3,7 @@ Contributors: MervinPraison
 Tags: seo, ai, openai, schema, sitemap
 Requires at least: 5.0
 Tested up to: 7.1
-Stable tag: 5.0.11
+Stable tag: 5.0.12
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -23,7 +23,7 @@ AISEO is a powerful AI-powered SEO plugin that helps you optimize your WordPress
 * **XML Sitemap** - Automatic sitemap generation
 * **Image SEO** - AI-powered alt text generation
 * **Bulk Operations** - Edit multiple posts at once
-* **Import/Export** - Migrate from Yoast, Rank Math, AIOSEO
+* **Import/Export** - Migrate from Yoast, Rank Math, AIOSEO, and SEOPress
 * **REST API** - 60+ endpoints for developers
 * **WP-CLI** - 70+ commands for automation
 
@@ -164,6 +164,13 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 
 == Changelog ==
 
+= 5.0.12 =
+* Gutenberg SEO sidebar, FAQ and breadcrumbs blocks, extra keywords, and readability checks
+* News, video, and image sitemaps; llms.txt; IndexNow; HTML sitemap; optional out-of-stock product noindex
+* Google Search Console OAuth, setup wizard, role manager, admin bar, and settings navigation
+* Import from SEOPress; WordPress 6.9 abilities for site and post SEO
+* Fix: importer noindex keys; admin screens enqueue scripts instead of inline tags
+
 = 5.0.11 =
 * Security: Check edit_post for each post in the bulk image alt handler, so a Contributor cannot rewrite images on posts they do not own
 * Security: Require the post type's create_posts capability before creating a draft from generated content
@@ -293,6 +300,21 @@ This service is provided by Google:
 = Competitor and backlink analysis (optional) =
 
 The competitor analysis and backlink monitoring features fetch the URLs that you explicitly add in the plugin's settings, in order to read their public pages. Requests are only made to addresses you enter yourself.
+
+= IndexNow (optional) =
+
+When IndexNow is enabled (on by default), publishing or updating a public post sends that URL to api.indexnow.org so participating search engines can recrawl it. A key file is served from your site to prove ownership. No post content is sent, only the URL.
+
+This service is provided by IndexNow:
+* https://www.indexnow.org/
+
+= Google Search Console (optional) =
+
+If you connect Search Console with your own Google Cloud OAuth client, the plugin requests read-only Search Analytics (clicks, impressions, queries, and pages) from Google. Tokens are stored on your site. Nothing is sent until you connect and refresh.
+
+This service is provided by Google:
+* Terms of service: https://policies.google.com/terms
+* Privacy policy: https://policies.google.com/privacy
 
 == Privacy Policy ==
 

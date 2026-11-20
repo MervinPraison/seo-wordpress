@@ -30,7 +30,6 @@ class AISEO_Admin {
      */
     public function __construct() {
         $this->define_tabs();
-        $this->active_tab = $this->get_active_tab();
 
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
@@ -48,6 +47,8 @@ class AISEO_Admin {
         add_action('wp_ajax_aiseo_add_redirect', array($this, 'ajax_add_redirect'));
         add_action('wp_ajax_aiseo_list_redirects', array($this, 'ajax_list_redirects'));
         add_action('wp_ajax_aiseo_delete_redirect', array($this, 'ajax_delete_redirect'));
+        add_action('admin_post_aiseo_export_redirects', array($this, 'handle_export_redirects'));
+        add_action('admin_post_aiseo_import_redirects', array($this, 'handle_import_redirects'));
         add_action('wp_ajax_aiseo_optimize_permalinks', array($this, 'ajax_optimize_permalinks'));
         add_action('wp_ajax_aiseo_regenerate_sitemap', array($this, 'ajax_regenerate_sitemap'));
         add_action('wp_ajax_aiseo_generate_image_alt', array($this, 'ajax_generate_image_alt'));
@@ -89,8 +90,7 @@ class AISEO_Admin {
      * Returns a fresh nonce without requiring nonce verification
      */
     public function ajax_refresh_nonce() {
-        // No nonce check is possible here (this endpoint issues the nonce), so
-        // gate it on the same capability every AISEO AJAX handler requires.
+        check_ajax_referer('aiseo_refresh_nonce', 'nonce');
         if (!is_user_logged_in() || !current_user_can('edit_posts')) {
             wp_send_json_error('Permission denied');
             return;
@@ -108,14 +108,20 @@ class AISEO_Admin {
             'dashboard' => array(
                 'title' => __('Dashboard', 'aiseo'),
                 'icon' => 'dashicons-dashboard',
-                'capability' => 'manage_options',
+                'capability' => 'edit_posts',
                 'callback' => array($this, 'render_dashboard_tab'),
             ),
-            'ai-content' => array(
-                'title' => __('AI Content', 'aiseo'),
-                'icon' => 'dashicons-edit',
-                'capability' => 'edit_posts',
-                'callback' => array($this, 'render_ai_content_tab'),
+            'settings' => array(
+                'title' => __('Settings', 'aiseo'),
+                'icon' => 'dashicons-admin-settings',
+                'capability' => 'aiseo_manage_settings',
+                'callback' => array($this, 'render_settings_tab'),
+            ),
+            'technical-seo' => array(
+                'title' => __('Technical SEO', 'aiseo'),
+                'icon' => 'dashicons-admin-tools',
+                'capability' => 'aiseo_manage_settings',
+                'callback' => array($this, 'render_technical_seo_tab'),
             ),
             'seo-tools' => array(
                 'title' => __('SEO Tools', 'aiseo'),
@@ -135,23 +141,17 @@ class AISEO_Admin {
                 'capability' => 'edit_posts',
                 'callback' => array($this, 'render_monitoring_tab'),
             ),
-            'technical-seo' => array(
-                'title' => __('Technical SEO', 'aiseo'),
-                'icon' => 'dashicons-admin-tools',
-                'capability' => 'manage_options',
-                'callback' => array($this, 'render_technical_seo_tab'),
-            ),
             'advanced' => array(
                 'title' => __('Advanced', 'aiseo'),
                 'icon' => 'dashicons-admin-generic',
                 'capability' => 'manage_options',
                 'callback' => array($this, 'render_advanced_tab'),
             ),
-            'settings' => array(
-                'title' => __('Settings', 'aiseo'),
-                'icon' => 'dashicons-admin-settings',
-                'capability' => 'manage_options',
-                'callback' => array($this, 'render_settings_tab'),
+            'ai-content' => array(
+                'title' => __('AI Content', 'aiseo'),
+                'icon' => 'dashicons-edit',
+                'capability' => 'edit_posts',
+                'callback' => array($this, 'render_ai_content_tab'),
             ),
         );
     }
@@ -160,14 +160,19 @@ class AISEO_Admin {
      * Get active tab from URL
      */
     private function get_active_tab() {
-        $tab = isset($_GET['tab']) ? sanitize_key($_GET['tab']) : 'dashboard';
-        
-        // Validate tab exists
-        if (!isset($this->tabs[$tab])) {
-            $tab = 'dashboard';
+        $requested = isset($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : '';
+
+        if ($requested && isset($this->tabs[$requested]) && current_user_can($this->tabs[$requested]['capability'])) {
+            return $requested;
         }
-        
-        return $tab;
+
+        foreach ($this->tabs as $tab_key => $tab) {
+            if (current_user_can($tab['capability'])) {
+                return $tab_key;
+            }
+        }
+
+        return 'dashboard';
     }
     
     /**
@@ -175,7 +180,7 @@ class AISEO_Admin {
      */
     public function add_admin_menu() {
         add_menu_page(
-            __('AISEO - AI-Powered SEO', 'aiseo'),
+            __('Praison AI SEO', 'aiseo'),
             __('AISEO', 'aiseo'),
             'edit_posts',
             'aiseo',
@@ -203,6 +208,7 @@ class AISEO_Admin {
         );
         
         // Scripts
+        wp_enqueue_media();
         wp_enqueue_script(
             'aiseo-admin',
             AISEO_PLUGIN_URL . 'admin/js/aiseo-admin.js',
@@ -215,6 +221,7 @@ class AISEO_Admin {
         wp_localize_script('aiseo-admin', 'aiseoAdmin', array(
             'ajaxUrl' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('aiseo_admin_nonce'),
+            'refreshNonce' => wp_create_nonce('aiseo_refresh_nonce'),
             'nonceRefreshAction' => 'aiseo_refresh_nonce',
             'strings' => array(
                 'generating' => __('Generating...', 'aiseo'),
@@ -222,14 +229,260 @@ class AISEO_Admin {
                 'error' => __('Error occurred', 'aiseo'),
                 'confirm' => __('Are you sure?', 'aiseo'),
                 'sessionExpired' => __('Session expired. Refreshing...', 'aiseo'),
+                'redirectAdded' => __('Redirect added.', 'aiseo'),
             ),
         ));
+
+        $tab = isset($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : 'dashboard';
+        if ($tab === 'bulk-operations') {
+            wp_enqueue_script(
+                'aiseo-bulk',
+                AISEO_PLUGIN_URL . 'admin/js/aiseo-bulk.js',
+                array('jquery', 'aiseo-admin'),
+                AISEO_VERSION,
+                true
+            );
+            wp_localize_script('aiseo-bulk', 'aiseoBulk', array(
+                'i18n' => array(
+                    'selectPosts' => __('Please select at least one post', 'aiseo'),
+                    'processing' => __('Processing', 'aiseo'),
+                    'of' => __('of', 'aiseo'),
+                    'complete' => __('Complete! Review and approve changes below.', 'aiseo'),
+                    'selectSave' => __('Please select at least one item to save', 'aiseo'),
+                    'saving' => __('Saving...', 'aiseo'),
+                    'saveApproved' => __('Save Approved Changes', 'aiseo'),
+                    'saved' => __('Saved', 'aiseo'),
+                    'changes' => __('changes successfully!', 'aiseo'),
+                    'title' => __('Title', 'aiseo'),
+                    'description' => __('Description', 'aiseo'),
+                    'analysis' => __('Analysis', 'aiseo'),
+                    'newField' => __('New', 'aiseo'),
+                    'error' => __('Error', 'aiseo'),
+                    'unknownError' => __('Unknown error', 'aiseo'),
+                    'noResults' => __('No results to display.', 'aiseo'),
+                    'sessionError' => __('Session Error: Please log out and log back in to WordPress', 'aiseo'),
+                    'connectionError' => __('Connection error', 'aiseo'),
+                    'importConfirm' => __('Import SEO data from this plugin? This may take a few minutes.', 'aiseo'),
+                    'importing' => __('Importing...', 'aiseo'),
+                    'success' => __('Success!', 'aiseo'),
+                    'imported' => __('Imported', 'aiseo'),
+                    'itemsFrom' => __('items from', 'aiseo'),
+                    'importFailed' => __('Import failed', 'aiseo'),
+                    'exporting' => __('Exporting...', 'aiseo'),
+                    'preparing' => __('Preparing export...', 'aiseo'),
+                    'noExport' => __('No data to export.', 'aiseo'),
+                    'exported' => __('Exported', 'aiseo'),
+                    'postsTo' => __('posts to', 'aiseo'),
+                    'exportFailed' => __('Export failed', 'aiseo'),
+                ),
+            ));
+        }
+        if ($tab === 'technical-seo') {
+            wp_enqueue_script(
+                'aiseo-technical',
+                AISEO_PLUGIN_URL . 'admin/js/aiseo-technical.js',
+                array('jquery', 'aiseo-admin'),
+                AISEO_VERSION,
+                true
+            );
+            wp_localize_script('aiseo-technical', 'aiseoTechnical', array(
+                'i18n' => array(
+                    'loading' => __('Loading redirects...', 'aiseo'),
+                    'from' => __('From URL', 'aiseo'),
+                    'to' => __('To URL', 'aiseo'),
+                    'type' => __('Type', 'aiseo'),
+                    'regex' => __('Regex', 'aiseo'),
+                    'hits' => __('Hits', 'aiseo'),
+                    'actions' => __('Actions', 'aiseo'),
+                    'yes' => __('Yes', 'aiseo'),
+                    'no' => __('No', 'aiseo'),
+                    'delete' => __('Delete', 'aiseo'),
+                    'items' => __('items', 'aiseo'),
+                    'previous' => __('Previous', 'aiseo'),
+                    'next' => __('Next', 'aiseo'),
+                    'of' => __('of', 'aiseo'),
+                    'none' => __('No redirects found. Create one above to get started.', 'aiseo'),
+                    'loadError' => __('Error loading redirects.', 'aiseo'),
+                    'adding' => __('Adding...', 'aiseo'),
+                    'added' => __('Redirect added.', 'aiseo'),
+                    'addRedirect' => __('Add Redirect', 'aiseo'),
+                    'deleteConfirm' => __('Are you sure you want to delete this redirect?', 'aiseo'),
+                    'deleting' => __('Deleting...', 'aiseo'),
+                    'error' => __('Error', 'aiseo'),
+                    'regenerating' => __('Regenerating...', 'aiseo'),
+                    'sitemapOk' => __('Sitemap regenerated successfully!', 'aiseo'),
+                    'regenerate' => __('Regenerate Sitemap', 'aiseo'),
+                    'searching' => __('Searching...', 'aiseo'),
+                    'searchingImages' => __('Searching for images without alt text...', 'aiseo'),
+                    'found' => __('Found', 'aiseo'),
+                    'missingAlt' => __('images without alt text:', 'aiseo'),
+                    'image' => __('Image', 'aiseo'),
+                    'post' => __('Post', 'aiseo'),
+                    'generateAlt' => __('Generate Alt', 'aiseo'),
+                    'editPost' => __('Edit Post', 'aiseo'),
+                    'allHaveAlt' => __('All images have alt text.', 'aiseo'),
+                    'findMissing' => __('Find Images Missing Alt Text', 'aiseo'),
+                    'generateAllConfirm' => __('Generate alt text for all images? This may take a while.', 'aiseo'),
+                    'generating' => __('Generating...', 'aiseo'),
+                    'progress' => __('Generating Alt Text Progress', 'aiseo'),
+                    'status' => __('Status', 'aiseo'),
+                    'completed' => __('Completed', 'aiseo'),
+                    'failed' => __('Failed', 'aiseo'),
+                    'noImages' => __('No images found that need alt text.', 'aiseo'),
+                    'generateAll' => __('Generate Alt Text for All Images', 'aiseo'),
+                ),
+            ));
+        }
+        if ($tab === 'seo-tools') {
+            wp_enqueue_script(
+                'aiseo-seo-tools',
+                AISEO_PLUGIN_URL . 'admin/js/aiseo-seo-tools.js',
+                array('jquery', 'aiseo-admin'),
+                AISEO_VERSION,
+                true
+            );
+            wp_localize_script('aiseo-seo-tools', 'aiseoSeoTools', array(
+                'i18n' => array(
+                    'selectPost' => __('Please select a post first', 'aiseo'),
+                    'generating' => __('Generating...', 'aiseo'),
+                    'failed' => __('Failed to generate', 'aiseo'),
+                    'connectionError' => __('Connection error', 'aiseo'),
+                    'generateTitle' => __('Generate Title', 'aiseo'),
+                    'generateDescription' => __('Generate Description', 'aiseo'),
+                    'analyzing' => __('Analyzing...', 'aiseo'),
+                    'analysisResults' => __('Analysis Results', 'aiseo'),
+                    'seoScore' => __('SEO Score', 'aiseo'),
+                    'failedAnalyze' => __('Failed to analyze', 'aiseo'),
+                    'analyzeContent' => __('Analyze Content', 'aiseo'),
+                    'gettingSuggestions' => __('Getting suggestions...', 'aiseo'),
+                    'untitled' => __('Untitled', 'aiseo'),
+                    'noSuggestions' => __('No suggestions found', 'aiseo'),
+                    'getLinking' => __('Get Linking Suggestions', 'aiseo'),
+                    'characters' => __('characters', 'aiseo'),
+                    'noVariations' => __('No variations generated. Try a different post.', 'aiseo'),
+                    'generateTitleVariations' => __('Generate Title Variations', 'aiseo'),
+                    'generateDescVariations' => __('Generate Description Variations', 'aiseo'),
+                ),
+            ));
+        }
+        if ($tab === 'ai-content') {
+            wp_enqueue_script(
+                'aiseo-ai-content',
+                AISEO_PLUGIN_URL . 'admin/js/aiseo-ai-content.js',
+                array('jquery', 'aiseo-admin'),
+                AISEO_VERSION,
+                true
+            );
+            wp_localize_script('aiseo-ai-content', 'aiseoAiContent', array(
+                'i18n' => array(
+                    'enterTopic' => __('Please enter a topic', 'aiseo'),
+                    'generating' => __('Generating Content...', 'aiseo'),
+                    'error' => __('Error:', 'aiseo'),
+                    'failedContent' => __('Failed to generate content', 'aiseo'),
+                    'connectionError' => __('Connection error', 'aiseo'),
+                    'timeout60' => __('Request timed out (60s). Please try again with shorter content.', 'aiseo'),
+                    'generatePost' => __('Generate Post', 'aiseo'),
+                    'noContent' => __('No content to create post from', 'aiseo'),
+                    'creating' => __('Creating Post...', 'aiseo'),
+                    'success' => __('Success!', 'aiseo'),
+                    'postCreated' => __('Post created!', 'aiseo'),
+                    'editPost' => __('Edit post', 'aiseo'),
+                    'errorOccurred' => __('Error occurred', 'aiseo'),
+                    'timeout30' => __('Request timed out (30s). The post may still be creating in the background.', 'aiseo'),
+                    'createPost' => __('Create Post', 'aiseo'),
+                    'enterRewrite' => __('Please enter content to rewrite', 'aiseo'),
+                    'rewriting' => __('Rewriting...', 'aiseo'),
+                    'unexpectedFormat' => __('Rewrite completed but content format is unexpected.', 'aiseo'),
+                    'rewriteFailed' => __('Rewrite failed', 'aiseo'),
+                    'rewriteContent' => __('Rewrite Content', 'aiseo'),
+                    'gettingSuggestions' => __('Getting suggestions...', 'aiseo'),
+                    'noSuggestions' => __('No suggestions generated. Try a different topic.', 'aiseo'),
+                    'failedSuggestions' => __('Failed to get suggestions', 'aiseo'),
+                    'getSuggestions' => __('Get Suggestions', 'aiseo'),
+                    'failedOutline' => __('Failed to generate outline', 'aiseo'),
+                    'introduction' => __('Introduction', 'aiseo'),
+                    'mainSections' => __('Main Sections', 'aiseo'),
+                    'section' => __('Section', 'aiseo'),
+                    'conclusion' => __('Conclusion', 'aiseo'),
+                    'cta' => __('Call to Action', 'aiseo'),
+                    'emptyOutline' => __('No outline generated. Try a different topic or check your API key.', 'aiseo'),
+                    'generateOutline' => __('Generate Outline', 'aiseo'),
+                    'enterContent' => __('Please enter content', 'aiseo'),
+                    'failedFaq' => __('Failed to generate FAQs', 'aiseo'),
+                    'noQuestion' => __('No question', 'aiseo'),
+                    'noAnswer' => __('No answer', 'aiseo'),
+                    'emptyFaq' => __('No FAQs generated. Try different content or check your API key.', 'aiseo'),
+                    'generateFaqs' => __('Generate FAQs', 'aiseo'),
+                    'copied' => __('Copied!', 'aiseo'),
+                    'generatedFrom' => __('Generated from', 'aiseo'),
+                    'serverError' => __('Server error (500). Check if the post was created anyway.', 'aiseo'),
+                ),
+            ));
+        }
+        if ($tab === 'advanced') {
+            wp_enqueue_script(
+                'aiseo-advanced',
+                AISEO_PLUGIN_URL . 'admin/js/aiseo-advanced.js',
+                array('jquery', 'aiseo-admin'),
+                AISEO_VERSION,
+                true
+            );
+            wp_localize_script('aiseo-advanced', 'aiseoAdvanced', array(
+                'i18n' => array(
+                    'saving' => __('Saving...', 'aiseo'),
+                    'saved' => __('Settings saved successfully!', 'aiseo'),
+                    'error' => __('Error', 'aiseo'),
+                    'saveSettings' => __('Save Post Type Settings', 'aiseo'),
+                    'enterKeyword' => __('Please enter a keyword', 'aiseo'),
+                    'researching' => __('Researching...', 'aiseo'),
+                    'suggestionsFor' => __('Keyword Suggestions for:', 'aiseo'),
+                    'researchKeyword' => __('Research Keyword', 'aiseo'),
+                    'generating' => __('Generating...', 'aiseo'),
+                    'reportTitle' => __('SEO Report Generated', 'aiseo'),
+                    'metric' => __('Metric', 'aiseo'),
+                    'value' => __('Value', 'aiseo'),
+                    'postsAnalyzed' => __('Posts Analyzed', 'aiseo'),
+                    'metadataGenerated' => __('Metadata Generated', 'aiseo'),
+                    'aiPosts' => __('AI Posts Created', 'aiseo'),
+                    'apiRequests' => __('API Requests', 'aiseo'),
+                    'connectionError' => __('Connection error', 'aiseo'),
+                    'generateReport' => __('Generate Full Report', 'aiseo'),
+                    'noReport' => __('No report data available', 'aiseo'),
+                    'reportHeading' => __('AISEO SEO Report', 'aiseo'),
+                    'generated' => __('Generated', 'aiseo'),
+                    'recentScores' => __('Recent Post Scores', 'aiseo'),
+                    'postTitle' => __('Post Title', 'aiseo'),
+                    'seoScore' => __('SEO Score', 'aiseo'),
+                    'enterTopic' => __('Please enter a topic', 'aiseo'),
+                    'generatingBrief' => __('Generating Brief...', 'aiseo'),
+                    'targetKeywords' => __('Target keywords', 'aiseo'),
+                    'wordCount' => __('Recommended word count', 'aiseo'),
+                    'structure' => __('Content structure', 'aiseo'),
+                    'keyTopics' => __('Key topics', 'aiseo'),
+                    'seoTips' => __('SEO tips', 'aiseo'),
+                    'failedBrief' => __('Failed to generate brief', 'aiseo'),
+                    'generateBrief' => __('Generate Content Brief', 'aiseo'),
+                    'noBrief' => __('No brief content to create post from', 'aiseo'),
+                    'creating' => __('Creating Post...', 'aiseo'),
+                    'postCreated' => __('Post created. ', 'aiseo'),
+                    'editPost' => __('Edit post', 'aiseo'),
+                    'fromBrief' => __('Generated from Content Brief', 'aiseo'),
+                    'createFromBrief' => __('Create Post from Brief', 'aiseo'),
+                ),
+            ));
+        }
     }
     
     /**
      * Enqueue Gutenberg block editor assets
      */
     public function enqueue_gutenberg_assets() {
+        wp_enqueue_style(
+            'aiseo-admin',
+            AISEO_PLUGIN_URL . 'admin/css/aiseo-admin.css',
+            array(),
+            AISEO_VERSION
+        );
         // Enqueue the rewrite button script
         wp_enqueue_script(
             'aiseo-gutenberg-rewrite',
@@ -243,13 +496,13 @@ class AISEO_Admin {
         wp_enqueue_script(
             'aiseo-seo-improver',
             AISEO_PLUGIN_URL . 'admin/js/gutenberg-seo-improver.js',
-            array('wp-plugins', 'wp-edit-post', 'wp-element', 'wp-components', 'wp-data', 'wp-i18n', 'jquery'),
+            array('wp-plugins', 'wp-edit-post', 'wp-editor', 'wp-element', 'wp-components', 'wp-data', 'wp-i18n', 'jquery'),
             AISEO_VERSION,
             true
         );
         
         // Localize scripts with nonce
-        wp_localize_script('aiseo-gutenberg-rewrite', 'aiseGutenbergData', array(
+        wp_localize_script('aiseo-gutenberg-rewrite', 'aiseoGutenbergData', array(
             'nonce' => wp_create_nonce('aiseo_admin_nonce'),
             'ajaxUrl' => admin_url('admin-ajax.php')
         ));
@@ -258,32 +511,49 @@ class AISEO_Admin {
             'nonce' => wp_create_nonce('aiseo_admin_nonce'),
             'ajaxUrl' => admin_url('admin-ajax.php')
         ));
+
+        wp_enqueue_script(
+            'aiseo-gutenberg-sidebar',
+            AISEO_PLUGIN_URL . 'admin/js/gutenberg-seo-sidebar.js',
+            array('wp-plugins', 'wp-edit-post', 'wp-editor', 'wp-block-editor', 'wp-element', 'wp-components', 'wp-data', 'wp-core-data', 'wp-i18n', 'wp-api-fetch'),
+            AISEO_VERSION,
+            true
+        );
+        wp_localize_script('aiseo-gutenberg-sidebar', 'aiseoSidebar', array(
+            'canRedirect' => current_user_can('aiseo_manage_redirects'),
+        ));
     }
     
     /**
      * Render main admin page
      */
     public function render_admin_page() {
+        $this->active_tab = $this->get_active_tab();
+
         // Check user capabilities
         if (!current_user_can('edit_posts')) {
-            wp_die(__('You do not have sufficient permissions to access this page.', 'aiseo'));
+            wp_die(esc_html__('You do not have sufficient permissions to access this page.', 'aiseo'));
         }
         
         ?>
         <div class="wrap aiseo-admin-wrap">
             <h1 class="aiseo-admin-title">
                 <span class="dashicons dashicons-chart-line"></span>
-                <?php echo esc_html__('AISEO - AI-Powered SEO', 'aiseo'); ?>
+                <?php echo esc_html__('Praison AI SEO', 'aiseo'); ?>
                 <span class="aiseo-version">v<?php echo esc_html(AISEO_VERSION); ?></span>
             </h1>
             
-            <?php $this->render_api_status_banner(); ?>
+            <?php
+            if ($this->active_tab === 'ai-content') {
+                $this->render_api_status_banner();
+            }
+            ?>
             
             <nav class="nav-tab-wrapper aiseo-tab-wrapper">
                 <?php $this->render_tabs(); ?>
             </nav>
             
-            <div class="aiseo-tab-content">
+            <div class="aiseo-tab-content<?php echo esc_attr(in_array($this->active_tab, array('dashboard', 'settings'), true) ? ' aiseo-tab-content-dashboard' : ''); ?>">
                 <?php $this->render_active_tab_content(); ?>
             </div>
         </div>
@@ -300,8 +570,8 @@ class AISEO_Admin {
             ?>
             <div class="notice notice-warning aiseo-api-warning">
                 <p>
-                    <strong><?php esc_html_e('OpenAI API Key Required', 'aiseo'); ?></strong>
-                    <?php esc_html_e('Please configure your OpenAI API key in the Settings tab to use AI features.', 'aiseo'); ?>
+                    <strong><?php esc_html_e('OpenAI API key is optional', 'aiseo'); ?></strong>
+                    <?php esc_html_e('Titles, sitemaps, schema and analysis work without it. Add a key only if you want AI writing.', 'aiseo'); ?>
                     <a href="<?php echo esc_url(admin_url('admin.php?page=aiseo&tab=settings')); ?>" class="button button-primary button-small">
                         <?php esc_html_e('Configure Now', 'aiseo'); ?>
                     </a>
@@ -325,7 +595,7 @@ class AISEO_Admin {
             $url = add_query_arg(array('page' => 'aiseo', 'tab' => $tab_key), admin_url('admin.php'));
             
             printf(
-                '<a href="%s" class="nav-tab %s"><span class="dashicons %s"></span> %s</a>',
+                '<a href="%s" class="nav-tab %s"><span class="dashicons %s" aria-hidden="true"></span> %s</a>',
                 esc_url($url),
                 esc_attr($active_class),
                 esc_attr($tab['icon']),
@@ -342,7 +612,7 @@ class AISEO_Admin {
         
         // Check capability
         if (!current_user_can($tab['capability'])) {
-            wp_die(__('You do not have sufficient permissions to access this page.', 'aiseo'));
+            wp_die(esc_html__('You do not have sufficient permissions to access this page.', 'aiseo'));
         }
         
         // Call tab callback
@@ -655,6 +925,10 @@ class AISEO_Admin {
             wp_send_json_error('Post ID is required');
             return;
         }
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
+            return;
+        }
         
         $post = get_post($post_id);
         if (!$post) {
@@ -700,6 +974,10 @@ class AISEO_Admin {
             wp_send_json_error('Post ID is required');
             return;
         }
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
+            return;
+        }
         
         $post = get_post($post_id);
         if (!$post) {
@@ -741,6 +1019,9 @@ class AISEO_Admin {
         if (!$post_id) {
             wp_send_json_error('Post ID is required');
         }
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
+        }
         
         $post = get_post($post_id);
         if (!$post || empty($post->post_content)) {
@@ -780,6 +1061,10 @@ class AISEO_Admin {
             wp_send_json_error('Post ID is required');
             return;
         }
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
+            return;
+        }
         
         if (!class_exists('AISEO_Analysis')) {
             wp_send_json_error('Analysis class not found');
@@ -808,31 +1093,28 @@ class AISEO_Admin {
     public function ajax_add_redirect() {
         check_ajax_referer('aiseo_admin_nonce', 'nonce');
         
-        if (!current_user_can('manage_options')) {
+        if (!current_user_can('aiseo_manage_redirects')) {
             wp_send_json_error('Permission denied');
         }
         
-        $from_url = isset($_POST['from_url']) ? sanitize_text_field($_POST['from_url']) : '';
-        $to_url = isset($_POST['to_url']) ? sanitize_text_field($_POST['to_url']) : '';
-        $type = isset($_POST['redirect_type']) ? absint($_POST['redirect_type']) : 301;
+        $is_regex = !empty($_POST['is_regex']);
+        $from_url = isset($_POST['from_url']) ? wp_unslash($_POST['from_url']) : '';
+        $from_url = $is_regex ? sanitize_text_field($from_url) : AISEO_Redirects::normalize_path($from_url);
+        $to_url = isset($_POST['to_url']) ? AISEO_Redirects::sanitize_target(wp_unslash($_POST['to_url'])) : '';
+        $type = isset($_POST['redirect_type']) ? sanitize_text_field(wp_unslash($_POST['redirect_type'])) : '301';
         
-        if (empty($from_url) || empty($to_url)) {
+        if ($from_url === '' || ($type !== '410' && $to_url === '')) {
             wp_send_json_error('Both URLs are required');
         }
         
-        // Store in options (simple implementation)
-        $redirects = get_option('aiseo_redirects', array());
-        $redirects[] = array(
-            'id' => uniqid('redirect_', true),
-            'from_url' => $from_url,
-            'to_url' => $to_url,
-            'type' => $type,
-            'hits' => 0,
-            'created' => current_time('mysql'),
-        );
-        update_option('aiseo_redirects', $redirects);
+        $manager = new AISEO_Redirects();
+        $manager->ensure_tables();
+        $created = $manager->create_redirect($from_url, $to_url, $type, array('is_regex' => $is_regex));
+        if (is_wp_error($created)) {
+            wp_send_json_error($created->get_error_message());
+        }
         
-        wp_send_json_success(array('message' => 'Redirect added successfully'));
+        wp_send_json_success(array('message' => 'Redirect added successfully', 'id' => $created));
     }
     
     /**
@@ -841,12 +1123,23 @@ class AISEO_Admin {
     public function ajax_list_redirects() {
         check_ajax_referer('aiseo_admin_nonce', 'nonce');
         
-        if (!current_user_can('manage_options')) {
+        if (!current_user_can('aiseo_manage_redirects')) {
             wp_send_json_error('Permission denied');
         }
         
-        // Get redirects from options
-        $redirects = get_option('aiseo_redirects', array());
+        $manager = new AISEO_Redirects();
+        $stored = $manager->get_redirects(array('limit' => 500));
+        $redirects = array();
+        foreach ($stored['redirects'] as $redirect) {
+            $redirects[] = array(
+                'id' => (string) $redirect['id'],
+                'from_url' => $redirect['source_url'],
+                'to_url' => $redirect['target_url'],
+                'type' => $redirect['redirect_type'],
+                'hits' => (int) $redirect['hits'],
+                'is_regex' => !empty($redirect['is_regex']),
+            );
+        }
         
         wp_send_json_success($redirects);
     }
@@ -857,38 +1150,68 @@ class AISEO_Admin {
     public function ajax_delete_redirect() {
         check_ajax_referer('aiseo_admin_nonce', 'nonce');
         
-        if (!current_user_can('manage_options')) {
+        if (!current_user_can('aiseo_manage_redirects')) {
             wp_send_json_error('Permission denied');
         }
         
-        $redirect_id = isset($_POST['redirect_id']) ? sanitize_text_field($_POST['redirect_id']) : '';
+        $redirect_id = isset($_POST['redirect_id']) ? absint($_POST['redirect_id']) : 0;
         
-        if (empty($redirect_id)) {
+        if (!$redirect_id) {
             wp_send_json_error('Redirect ID is required');
         }
         
-        // Get current redirects
-        $redirects = get_option('aiseo_redirects', array());
-        
-        // Find and remove the redirect
-        $found = false;
-        foreach ($redirects as $key => $redirect) {
-            if (isset($redirect['id']) && $redirect['id'] === $redirect_id) {
-                unset($redirects[$key]);
-                $found = true;
-                break;
-            }
-        }
-        
-        if (!$found) {
+        $manager = new AISEO_Redirects();
+        if (!$manager->delete_redirect($redirect_id)) {
             wp_send_json_error('Redirect not found');
         }
         
-        // Re-index array and save
-        $redirects = array_values($redirects);
-        update_option('aiseo_redirects', $redirects);
-        
         wp_send_json_success(array('message' => 'Redirect deleted successfully'));
+    }
+
+    /**
+     * Download stored redirects as CSV.
+     */
+    public function handle_export_redirects() {
+        check_admin_referer('aiseo_export_redirects');
+        if (!current_user_can('aiseo_manage_redirects')) {
+            wp_die(esc_html__('Permission denied', 'aiseo'), '', array('response' => 403));
+        }
+        $csv = (new AISEO_Redirects())->export_redirects();
+        nocache_headers();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="aiseo-redirects.csv"');
+        echo $csv; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- CSV download.
+        exit;
+    }
+
+    /**
+     * Import redirects from an uploaded CSV file.
+     */
+    public function handle_import_redirects() {
+        check_admin_referer('aiseo_import_redirects');
+        if (!current_user_can('aiseo_manage_redirects')) {
+            wp_die(esc_html__('Permission denied', 'aiseo'), '', array('response' => 403));
+        }
+        $redirect = admin_url('admin.php?page=aiseo&tab=technical-seo');
+        if (empty($_FILES['aiseo_redirects_csv']['tmp_name']) || !is_uploaded_file($_FILES['aiseo_redirects_csv']['tmp_name'])) {
+            wp_safe_redirect(add_query_arg('aiseo_redirects', 'missing', $redirect));
+            exit;
+        }
+        $size = isset($_FILES['aiseo_redirects_csv']['size']) ? (int) $_FILES['aiseo_redirects_csv']['size'] : 0;
+        if ($size < 1 || $size > 512000) {
+            wp_safe_redirect(add_query_arg('aiseo_redirects', 'too_large', $redirect));
+            exit;
+        }
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_get_contents -- Uploaded tmp file, not a plugin path.
+        $raw = file_get_contents($_FILES['aiseo_redirects_csv']['tmp_name']);
+        if (!is_string($raw) || $raw === '') {
+            wp_safe_redirect(add_query_arg('aiseo_redirects', 'missing', $redirect));
+            exit;
+        }
+        $result = (new AISEO_Redirects())->bulk_import_redirects($raw);
+        $imported = isset($result['imported']) ? (int) $result['imported'] : 0;
+        wp_safe_redirect(add_query_arg('aiseo_redirects', 'imported', add_query_arg('aiseo_imported', (string) $imported, $redirect)));
+        exit;
     }
     
     /**
@@ -906,7 +1229,11 @@ class AISEO_Admin {
         }
         
         $permalink = new AISEO_Permalink();
-        $posts = get_posts(array('numberposts' => 100, 'post_status' => 'publish'));
+        $posts = get_posts(array(
+            'numberposts' => 20,
+            'post_status' => 'publish',
+            'post_type' => array('post', 'page'),
+        ));
         $optimized = 0;
         
         foreach ($posts as $post) {
@@ -931,18 +1258,38 @@ class AISEO_Admin {
             wp_send_json_error('Permission denied');
         }
         
-        // Clear sitemap cache
-        delete_transient('aiseo_sitemap_cache');
-        
-        // Regenerate by accessing the sitemap
         if (class_exists('AISEO_Sitemap')) {
             $sitemap = new AISEO_Sitemap();
-            $sitemap->generate_sitemap();
+            $sitemap->clear_cache();
         }
         
-        wp_send_json_success('Sitemap regenerated successfully');
+        wp_send_json_success('Sitemap cache cleared');
     }
     
+    /**
+     * Alt text for an image URL. Uses the image SEO generator for media-library files.
+     *
+     * @param string $image_url Image URL.
+     * @return string
+     */
+    private function alt_text_for_image($image_url) {
+        $attachment_id = attachment_url_to_postid($image_url);
+        if ($attachment_id && class_exists('AISEO_Image_SEO') && current_user_can('edit_post', $attachment_id)) {
+            $generator = new AISEO_Image_SEO();
+            $generated = $generator->generate_alt_text($attachment_id, array('overwrite' => false));
+            if (!is_wp_error($generated) && is_string($generated) && $generated !== '') {
+                return $generated;
+            }
+        }
+
+        $name = basename((string) wp_parse_url($image_url, PHP_URL_PATH));
+        $name = preg_replace('/\.[^.]+$/', '', $name);
+        $name = str_replace(array('-', '_'), ' ', (string) $name);
+        $name = trim($name);
+
+        return $name !== '' ? ucwords($name) : __('Image', 'aiseo');
+    }
+
     /**
      * AJAX: Generate image alt text (Technical SEO)
      */
@@ -980,8 +1327,7 @@ class AISEO_Admin {
                         if (preg_match('/src=["\']([^"\']+)["\']/', $img_tag, $src_match)) {
                             $image_url = $src_match[1];
                             
-                            // Generate mock alt text (in real implementation, use AI)
-                            $alt_text = 'AI-generated: ' . basename($image_url, '.' . pathinfo($image_url, PATHINFO_EXTENSION));
+                            $alt_text = $this->alt_text_for_image($image_url);
                             
                             // Update the image tag with alt text
                             $new_img_tag = preg_replace('/<img/', '<img alt="' . esc_attr($alt_text) . '"', $img_tag, 1);
@@ -992,21 +1338,23 @@ class AISEO_Admin {
                                 'ID' => $post->ID,
                                 'post_content' => $new_content
                             ));
+
+                            $saved = !is_wp_error($updated) && $updated > 0;
+                            if ($saved) {
+                                $post->post_content = $new_content;
+                                $success_count++;
+                            } else {
+                                $failed_count++;
+                            }
                             
                             $results[] = array(
                                 'post_title' => $post->post_title,
                                 'post_id' => $post->ID,
                                 'url' => $image_url,
                                 'alt_text' => $alt_text,
-                                'success' => !is_wp_error($updated) && $updated > 0,
-                                'message' => !is_wp_error($updated) && $updated > 0 ? 'Updated' : 'Failed'
+                                'success' => $saved,
+                                'message' => $saved ? 'Updated' : 'Failed'
                             );
-                            
-                            if (!is_wp_error($updated) && $updated > 0) {
-                                $success_count++;
-                            } else {
-                                $failed_count++;
-                            }
                         }
                     }
                 }
@@ -1031,7 +1379,7 @@ class AISEO_Admin {
             wp_send_json_error('Permission denied');
         }
         
-        $cpt_settings = isset($_POST['aiseo_cpt']) ? array_map('sanitize_text_field', $_POST['aiseo_cpt']) : array();
+        $cpt_settings = isset($_POST['aiseo_cpt']) ? array_map('sanitize_text_field', wp_unslash($_POST['aiseo_cpt'])) : array();
         update_option('aiseo_enabled_post_types', $cpt_settings);
         
         wp_send_json_success('Custom post type settings saved');
@@ -1053,7 +1401,7 @@ class AISEO_Admin {
             'posts_per_page' => -1,
             'meta_query' => array(
                 array(
-                    'key' => '_aiseo_title',
+                    'key' => '_aiseo_meta_title',
                     'compare' => 'EXISTS'
                 )
             ),
@@ -1065,7 +1413,7 @@ class AISEO_Admin {
             'posts_per_page' => -1,
             'meta_query' => array(
                 array(
-                    'key' => '_aiseo_description',
+                    'key' => '_aiseo_meta_description',
                     'compare' => 'EXISTS'
                 )
             ),
@@ -1331,43 +1679,12 @@ class AISEO_Admin {
         if (!$post_id) {
             wp_send_json_error('Post ID is required');
         }
-        
-        if (!class_exists('AISEO_Internal_Linking')) {
-            // Mock response for demo
-            $post = get_post($post_id);
-            $suggestions = array(
-                array(
-                    'title' => 'Related Article: Getting Started Guide',
-                    'url' => home_url('/getting-started'),
-                    'reason' => 'Highly relevant content with similar keywords'
-                ),
-                array(
-                    'title' => 'Tutorial: Advanced Techniques',
-                    'url' => home_url('/advanced-tutorial'),
-                    'reason' => 'Complementary topic that adds value'
-                ),
-                array(
-                    'title' => 'Case Study: Success Story',
-                    'url' => home_url('/case-study'),
-                    'reason' => 'Real-world example to support your points'
-                ),
-                array(
-                    'title' => 'Resource: Tools and Templates',
-                    'url' => home_url('/resources'),
-                    'reason' => 'Helpful resources for readers'
-                ),
-                array(
-                    'title' => 'FAQ: Common Questions',
-                    'url' => home_url('/faq'),
-                    'reason' => 'Answers related questions readers might have'
-                )
-            );
-            wp_send_json_success($suggestions);
-            return;
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
         }
         
         $linking = new AISEO_Internal_Linking();
-        $suggestions = $linking->get_suggestions($post_id, 5);
+        $suggestions = $linking->get_suggestions($post_id, array('limit' => 5, 'use_cache' => false));
         
         if (is_wp_error($suggestions)) {
             wp_send_json_error($suggestions->get_error_message());
@@ -1393,52 +1710,41 @@ class AISEO_Admin {
             wp_send_json_error('Post ID is required');
             return;
         }
-        
-        if (!class_exists('AISEO_Meta_Variations')) {
-            // Mock response for demo
-            $post = get_post($post_id);
-            if (!$post) {
-                wp_send_json_error('Post not found');
-                return;
-            }
-            $post_title = $post->post_title;
-            
-            if ($type === 'title') {
-                $result = array(
-                    array('text' => $post_title . ' - Complete Guide', 'score' => 95),
-                    array('text' => 'How to ' . $post_title . ' Successfully', 'score' => 92),
-                    array('text' => $post_title . ': Tips and Best Practices', 'score' => 88),
-                    array('text' => 'The Ultimate ' . $post_title . ' Tutorial', 'score' => 85),
-                    array('text' => $post_title . ' Explained Simply', 'score' => 82)
-                );
-            } else {
-                $result = array(
-                    array('text' => 'Learn everything about ' . strtolower($post_title) . ' with our comprehensive guide. Includes tips, examples, and best practices.', 'score' => 94),
-                    array('text' => 'Discover the best ways to implement ' . strtolower($post_title) . '. Step-by-step instructions and expert advice.', 'score' => 91),
-                    array('text' => 'Master ' . strtolower($post_title) . ' with this detailed tutorial. Perfect for beginners and experts alike.', 'score' => 87),
-                    array('text' => 'Complete guide to ' . strtolower($post_title) . '. Everything you need to know in one place.', 'score' => 84),
-                    array('text' => 'Improve your understanding of ' . strtolower($post_title) . ' with practical examples and proven strategies.', 'score' => 81)
-                );
-            }
-            wp_send_json_success($result);
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
             return;
         }
-        
-        $variations = new AISEO_Meta_Variations();
+
         $post = get_post($post_id);
-        $keyword = get_post_meta($post_id, '_aiseo_focus_keyword', true);
-        
-        if ($type === 'title') {
-            $result = $variations->generate_title_variations($post->post_content, $keyword, 5);
-        } else {
-            $result = $variations->generate_description_variations($post->post_content, $keyword, 5);
+        if (!$post) {
+            wp_send_json_error('Post not found');
+            return;
         }
-        
+
+        $variations = new AISEO_Meta_Variations();
+        $keyword = get_post_meta($post_id, '_aiseo_focus_keyword', true);
+
+        if ($type === 'title') {
+            wp_send_json_success($variations->title_options($post, $keyword));
+        }
+
+        $result = $variations->generate($post->post_content, $keyword, 5);
         if (is_wp_error($result)) {
             wp_send_json_error($result->get_error_message());
         }
-        
-        wp_send_json_success($result);
+
+        $rows = array();
+        foreach ($result['variations'] as $item) {
+            $text = is_array($item) ? ($item['description'] ?? '') : (string) $item;
+            if ($text === '') {
+                continue;
+            }
+            $rows[] = array(
+                'text' => $text,
+                'length' => strlen($text),
+            );
+        }
+        wp_send_json_success($rows);
     }
     
     /**
@@ -1512,8 +1818,8 @@ class AISEO_Admin {
                         continue;
                     }
                     
-                    $meta_title = get_post_meta($post_id, '_aiseo_title', true);
-                    $meta_desc = get_post_meta($post_id, '_aiseo_description', true);
+                    $meta_title = get_post_meta($post_id, '_aiseo_meta_title', true);
+                    $meta_desc = get_post_meta($post_id, '_aiseo_meta_description', true);
                     $keyword = get_post_meta($post_id, '_aiseo_focus_keyword', true);
                     
                     // Only include posts with SEO data
@@ -1572,7 +1878,7 @@ class AISEO_Admin {
         }
         
         $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
-        $value = isset($_POST['value']) ? sanitize_text_field($_POST['value']) : '';
+        $value = isset($_POST['value']) ? sanitize_text_field(wp_unslash($_POST['value'])) : '';
         
         if (!$post_id || empty($value)) {
             wp_send_json_error('Invalid data');
@@ -1582,8 +1888,9 @@ class AISEO_Admin {
             wp_send_json_error('Permission denied');
         }
         
-        // Update post meta for SEO title
-        update_post_meta($post_id, '_aiseo_title', $value);
+        update_post_meta($post_id, '_aiseo_meta_title', $value);
+        delete_transient('aiseo_dashboard_counts');
+        delete_transient('aiseo_dashboard_audit');
         
         wp_send_json_success(array('post_id' => $post_id, 'title' => $value));
     }
@@ -1599,7 +1906,7 @@ class AISEO_Admin {
         }
         
         $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
-        $value = isset($_POST['value']) ? sanitize_text_field($_POST['value']) : '';
+        $value = isset($_POST['value']) ? sanitize_textarea_field(wp_unslash($_POST['value'])) : '';
         
         if (!$post_id || empty($value)) {
             wp_send_json_error('Invalid data');
@@ -1609,8 +1916,9 @@ class AISEO_Admin {
             wp_send_json_error('Permission denied');
         }
         
-        // Update post meta for SEO description
-        update_post_meta($post_id, '_aiseo_description', $value);
+        update_post_meta($post_id, '_aiseo_meta_description', $value);
+        delete_transient('aiseo_dashboard_counts');
+        delete_transient('aiseo_dashboard_audit');
         
         wp_send_json_success(array('post_id' => $post_id, 'description' => $value));
     }
@@ -1635,6 +1943,9 @@ class AISEO_Admin {
         $images_without_alt = array();
         
         foreach ($posts as $post) {
+            if (!current_user_can('edit_post', $post->ID)) {
+                continue;
+            }
             // Find images in post content
             preg_match_all('/<img[^>]+>/i', $post->post_content, $matches);
             
@@ -1884,7 +2195,7 @@ class AISEO_Admin {
             }
         } else {
             // Fallback: look for Q: and A: patterns
-            $lines = explode("\n", strip_tags($html));
+            $lines = explode("\n", wp_strip_all_tags($html));
             foreach ($lines as $line) {
                 $line = trim($line);
                 if (empty($line)) continue;
@@ -1974,6 +2285,10 @@ class AISEO_Admin {
             wp_send_json_error('Missing required data');
             return;
         }
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
+            return;
+        }
         
         $post = get_post($post_id);
         if (!$post) {
@@ -2009,7 +2324,7 @@ class AISEO_Admin {
             }
             
             // Clean up the response
-            $improved_title = trim(strip_tags($improved_title));
+            $improved_title = trim(wp_strip_all_tags($improved_title));
             
             wp_send_json_success(array(
                 'title' => $improved_title,
@@ -2084,7 +2399,7 @@ class AISEO_Admin {
             $improved_content = trim($improved_content);
             
             if ($block_type === 'core/heading') {
-                $improved_content = strip_tags($improved_content);
+                $improved_content = wp_strip_all_tags($improved_content);
             }
             
             wp_send_json_success($improved_content);

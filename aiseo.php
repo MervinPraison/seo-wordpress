@@ -3,7 +3,7 @@
  * Plugin Name: AISEO
  * Plugin URI: https://github.com/MervinPraison/WordPressAISEO
  * Description: AI-powered SEO optimization for WordPress. Automatically generate meta descriptions, titles, schema markup, and comprehensive SEO analysis using artificial intelligence.
- * Version: 5.0.11
+ * Version: 5.0.12
  * Author: MervinPraison
  * Author URI: https://mer.vin
  * License: GPL-2.0-or-later
@@ -20,12 +20,13 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('AISEO_VERSION', '5.0.11');
+define('AISEO_VERSION', '5.0.12');
 
-// Register AJAX actions immediately, before init hooks
+// Register AJAX actions immediately, before init hooks. Guard so aiseo_init() does not construct AISEO_Admin twice.
 if (is_admin() && defined('DOING_AJAX') && DOING_AJAX) {
     require_once dirname(__FILE__) . '/admin/class-aiseo-admin.php';
-    if (class_exists('AISEO_Admin')) {
+    if (class_exists('AISEO_Admin') && !defined('AISEO_ADMIN_LOADED')) {
+        define('AISEO_ADMIN_LOADED', true);
         new AISEO_Admin();
     }
 }
@@ -33,34 +34,39 @@ define('AISEO_PLUGIN_FILE', __FILE__);
 define('AISEO_PLUGIN_DIR', dirname(__FILE__) . '/');
 define('AISEO_PLUGIN_URL', function_exists('plugin_dir_url') ? plugin_dir_url(__FILE__) : '');
 
-// Load .env file if it exists
-if (file_exists(AISEO_PLUGIN_DIR . '.env')) {
-    $env_file = file_get_contents(AISEO_PLUGIN_DIR . '.env');
-    $env_lines = explode("\n", $env_file);
-    
-    foreach ($env_lines as $line) {
-        $line = trim($line);
-        if (empty($line) || strpos($line, '#') === 0) {
+/**
+ * Load optional local .env values. Not shipped on WordPress.org.
+ */
+function aiseo_load_env_file() {
+    if (!file_exists(AISEO_PLUGIN_DIR . '.env')) {
+        return;
+    }
+    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_get_contents -- Optional local .env, not shipped.
+    $aiseo_env_file = file_get_contents(AISEO_PLUGIN_DIR . '.env');
+    if (!is_string($aiseo_env_file) || $aiseo_env_file === '') {
+        return;
+    }
+    $aiseo_env_lines = explode("\n", $aiseo_env_file);
+    foreach ($aiseo_env_lines as $aiseo_env_line) {
+        $aiseo_env_line = trim($aiseo_env_line);
+        if ($aiseo_env_line === '' || strpos($aiseo_env_line, '#') === 0) {
             continue;
         }
-        
-        if (strpos($line, '=') !== false) {
-            list($key, $value) = explode('=', $line, 2);
-            $key = trim($key);
-            $value = trim($value);
-            
-            // Remove quotes if present
-            $value = trim($value, '"\'');
-            
-            if (!defined($key)) {
-                define($key, $value);
-            }
-            
-            // Also set as environment variable
-            putenv("$key=$value");
+        if (strpos($aiseo_env_line, '=') === false) {
+            continue;
+        }
+        list($aiseo_env_key, $aiseo_env_value) = explode('=', $aiseo_env_line, 2);
+        $aiseo_env_key = trim($aiseo_env_key);
+        $aiseo_env_value = trim(trim($aiseo_env_value), '"\'');
+        if ($aiseo_env_key === '') {
+            continue;
+        }
+        if (!defined($aiseo_env_key)) {
+            define($aiseo_env_key, $aiseo_env_value);
         }
     }
 }
+aiseo_load_env_file();
 
 /**
  * Autoloader for plugin classes
@@ -86,6 +92,7 @@ spl_autoload_register(function ($class) {
 function aiseo_activate() {
     // Load required classes
     require_once AISEO_PLUGIN_DIR . 'includes/class-aiseo-helpers.php';
+    $aiseo_had_version = get_option('aiseo_version') !== false;
     
     // Set default options
     $defaults = array(
@@ -112,15 +119,23 @@ function aiseo_activate() {
     }
     
     // Generate encryption keys if not exists
-    if (!defined('AISEO_ENCRYPTION_KEY')) {
-        AISEO_Helpers::generate_encryption_keys();
-    }
+    AISEO_Helpers::generate_encryption_keys();
     
     // Create custom tables
     aiseo_create_tables();
-    
-    // Flush rewrite rules
+
+    $sitemap = new AISEO_Sitemap();
+    $sitemap->add_rewrite_rules();
     flush_rewrite_rules();
+
+    if (class_exists('AISEO_Roles')) {
+        $roles = new AISEO_Roles();
+        $roles->ensure_administrator_caps();
+    }
+
+    if (!$aiseo_had_version && get_option('aiseo_setup_complete', '') === '') {
+        set_transient('aiseo_activation_redirect', 1, 60);
+    }
 }
 register_activation_hook(__FILE__, 'aiseo_activate');
 
@@ -289,9 +304,10 @@ function aiseo_init() {
     }
     
     // Initialize admin interface (wp-admin only; skipped for front-end and WP-CLI)
-    if (is_admin() && file_exists(AISEO_PLUGIN_DIR . 'admin/class-aiseo-admin.php')) {
+    if (is_admin() && file_exists(AISEO_PLUGIN_DIR . 'admin/class-aiseo-admin.php') && !defined('AISEO_ADMIN_LOADED')) {
         require_once AISEO_PLUGIN_DIR . 'admin/class-aiseo-admin.php';
         if (class_exists('AISEO_Admin')) {
+            define('AISEO_ADMIN_LOADED', true);
             new AISEO_Admin();
         }
     }

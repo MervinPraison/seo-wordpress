@@ -19,13 +19,15 @@ class AISEO_Image_SEO {
      * Initialize the class
      */
     public function __construct() {
-        add_action('admin_menu', [$this, 'add_admin_menu']);
+        add_action('admin_menu', [$this, 'add_admin_menu'], 20);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_scripts']);
         
         // AJAX handlers
-        add_action('wp_ajax_aiseo_generate_single_alt', [$this, 'ajax_generate_single_alt']);
+        add_action('wp_ajax_aiseo_image_generate_alt', [$this, 'ajax_generate_single_alt']);
         add_action('wp_ajax_aiseo_bulk_generate_alt', [$this, 'ajax_bulk_generate_alt']);
         add_action('wp_ajax_aiseo_get_missing_alt', [$this, 'ajax_get_missing_alt']);
+        add_action('add_attachment', [$this, 'maybe_set_alt_from_filename']);
+        add_filter('wp_get_attachment_image_attributes', [$this, 'fill_empty_alt'], 10, 2);
     }
     
     /**
@@ -33,7 +35,7 @@ class AISEO_Image_SEO {
      */
     public function add_admin_menu() {
         add_submenu_page(
-            'aiseo-settings',
+            'aiseo',
             __('Image SEO', 'aiseo'),
             __('Image SEO', 'aiseo'),
             'upload_files',
@@ -64,6 +66,64 @@ class AISEO_Image_SEO {
         ]);
     }
     
+    /**
+     * Filename-based alt when an image is uploaded with none set.
+     *
+     * @param int $attachment_id Attachment ID.
+     */
+    public function maybe_set_alt_from_filename($attachment_id) {
+        $attachment_id = absint($attachment_id);
+        if (!$attachment_id || !wp_attachment_is_image($attachment_id)) {
+            return;
+        }
+        $alt = get_post_meta($attachment_id, '_wp_attachment_image_alt', true);
+        if (is_string($alt) && $alt !== '') {
+            return;
+        }
+        $alt = $this->alt_from_attachment($attachment_id);
+        if ($alt !== '') {
+            update_post_meta($attachment_id, '_wp_attachment_image_alt', $alt);
+        }
+    }
+
+    /**
+     * Fill empty alt attributes on the front end.
+     *
+     * @param array   $attr       Image attributes.
+     * @param WP_Post $attachment Attachment.
+     * @return array
+     */
+    public function fill_empty_alt($attr, $attachment) {
+        if (!is_array($attr) || !empty($attr['alt']) || !$attachment instanceof WP_Post) {
+            return $attr;
+        }
+        $alt = get_post_meta($attachment->ID, '_wp_attachment_image_alt', true);
+        if (!is_string($alt) || $alt === '') {
+            $alt = $this->alt_from_attachment($attachment->ID);
+        }
+        if ($alt !== '') {
+            $attr['alt'] = $alt;
+        }
+        return $attr;
+    }
+
+    /**
+     * @param int $attachment_id Attachment ID.
+     * @return string
+     */
+    private function alt_from_attachment($attachment_id) {
+        $post = get_post($attachment_id);
+        if ($post instanceof WP_Post && is_string($post->post_title) && $post->post_title !== '' && $post->post_title !== $post->post_name) {
+            return sanitize_text_field($post->post_title);
+        }
+        $file = get_attached_file($attachment_id);
+        if (!is_string($file) || $file === '') {
+            return '';
+        }
+        $name = str_replace(array('-', '_'), ' ', pathinfo($file, PATHINFO_FILENAME));
+        return sanitize_text_field($name);
+    }
+
     /**
      * Generate AI-powered alt text for an image
      *
@@ -290,6 +350,7 @@ class AISEO_Image_SEO {
             $checks['alt_text_length'] = [
                 'score' => 10,
                 'status' => 'good',
+                /* translators: %d: number. */
                 'message' => sprintf(__('Alt text length is optimal (%d chars)', 'aiseo'), $alt_length)
             ];
         } else if ($alt_length > 0) {
@@ -297,6 +358,7 @@ class AISEO_Image_SEO {
             $checks['alt_text_length'] = [
                 'score' => 5,
                 'status' => 'ok',
+                /* translators: %d: number. */
                 'message' => sprintf(__('Alt text length could be improved (%d chars)', 'aiseo'), $alt_length)
             ];
         }
@@ -310,6 +372,7 @@ class AISEO_Image_SEO {
             $checks['keyword_in_alt'] = [
                 'score' => 20,
                 'status' => 'good',
+                /* translators: %s: text. */
                 'message' => sprintf(__('Focus keyword "%s" found in alt text', 'aiseo'), $focus_keyword)
             ];
         }
@@ -346,6 +409,7 @@ class AISEO_Image_SEO {
             $checks['file_size'] = [
                 'score' => 20,
                 'status' => 'good',
+                /* translators: numeric value. */
                 'message' => sprintf(__('Image size is optimized (%.1f KB)', 'aiseo'), $filesize)
             ];
         } else if ($filesize < 200) {
@@ -353,6 +417,7 @@ class AISEO_Image_SEO {
             $checks['file_size'] = [
                 'score' => 10,
                 'status' => 'ok',
+                /* translators: numeric value. */
                 'message' => sprintf(__('Image size is acceptable (%.1f KB)', 'aiseo'), $filesize)
             ];
         }
@@ -381,7 +446,10 @@ class AISEO_Image_SEO {
                 wp_send_json_error(['message' => __('Image ID is required', 'aiseo')]);
             }
             
-            $image_id = intval($_POST['image_id']);
+            $image_id = absint(wp_unslash($_POST['image_id']));
+            if (!$image_id || !current_user_can('edit_post', $image_id)) {
+                wp_send_json_error(['message' => __('Permission denied', 'aiseo')]);
+            }
             $overwrite = !empty($_POST['overwrite']);
             
             $alt_text = $this->generate_alt_text($image_id, ['overwrite' => $overwrite]);
@@ -429,6 +497,7 @@ class AISEO_Image_SEO {
             $total_images = 0;
         }
         
-        include AISEO_PLUGIN_DIR . 'admin/views/image-seo-page.php';
+        require_once AISEO_PLUGIN_DIR . 'admin/views/image-seo-page.php';
+        aiseo_render_image_seo_page_view($images, $total_images);
     }
 }

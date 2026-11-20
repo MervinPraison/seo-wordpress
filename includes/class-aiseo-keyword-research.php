@@ -87,8 +87,10 @@ class AISEO_Keyword_Research {
                 'type' => $kw['type'] ?? 'short-tail',
                 'intent' => $kw['intent'] ?? 'informational',
                 'difficulty' => $kw['estimated_difficulty'] ?? 'medium',
-                'search_volume' => $this->estimate_search_volume($kw['keyword'] ?? ''),
-                'cpc' => $this->estimate_cpc($kw['keyword'] ?? ''),
+                'search_volume' => null,
+                'cpc' => null,
+                'volume_source' => 'unavailable',
+                'difficulty_source' => 'ai_estimate',
                 'competition' => $this->calculate_competition($kw['estimated_difficulty'] ?? 'medium')
             ];
         }
@@ -179,11 +181,9 @@ class AISEO_Keyword_Research {
         
         $api = new AISEO_API();
         
-        $prompt = "Analyze the SEO difficulty for the keyword '{$keyword}'.
-        Consider: competition level, search volume potential, ranking difficulty.
+        $prompt = "Give an editorial opinion of how competitive the keyword '{$keyword}' might be to write for, based only on the phrase itself. Do not invent search volume, CPC, or ranking positions.
         Return as JSON:
         {
-            \"difficulty_score\": 0-100,
             \"difficulty_level\": \"easy|medium|hard|very hard\",
             \"factors\": [\"factor1\", \"factor2\"],
             \"recommendations\": [\"tip1\", \"tip2\"]
@@ -220,6 +220,10 @@ class AISEO_Keyword_Research {
         $word_count = str_word_count($keyword);
         $analysis['keyword_length'] = $word_count;
         $analysis['keyword_type'] = $word_count <= 2 ? 'short-tail' : 'long-tail';
+        $analysis['source'] = 'ai_estimate';
+        unset($analysis['difficulty_score']);
+        unset($analysis['search_volume']);
+        unset($analysis['cpc']);
         
         // Cache for 14 days
         set_transient($cache_key, $analysis, 14 * DAY_IN_SECONDS);
@@ -342,44 +346,6 @@ class AISEO_Keyword_Research {
     }
     
     /**
-     * Estimate search volume (simplified)
-     *
-     * @param string $keyword Keyword
-     * @return string Estimated range
-     */
-    private function estimate_search_volume($keyword) {
-        $word_count = str_word_count($keyword);
-        
-        // Simple heuristic based on keyword length
-        if ($word_count <= 2) {
-            return '10K-100K'; // Short-tail
-        } elseif ($word_count <= 4) {
-            return '1K-10K'; // Medium-tail
-        } else {
-            return '100-1K'; // Long-tail
-        }
-    }
-    
-    /**
-     * Estimate CPC (simplified)
-     *
-     * @param string $keyword Keyword
-     * @return string Estimated CPC
-     */
-    private function estimate_cpc($keyword) {
-        // Check for commercial intent keywords
-        $commercial_terms = ['buy', 'purchase', 'price', 'cost', 'cheap', 'best', 'review', 'compare'];
-        
-        foreach ($commercial_terms as $term) {
-            if (stripos($keyword, $term) !== false) {
-                return '$1.50-$5.00'; // Higher CPC for commercial
-            }
-        }
-        
-        return '$0.50-$2.00'; // Lower CPC for informational
-    }
-    
-    /**
      * Calculate competition level
      *
      * @param string $difficulty Difficulty level
@@ -407,20 +373,26 @@ class AISEO_Keyword_Research {
         // Count cached keywords
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table, no WP equivalent
         $cached_suggestions = $wpdb->get_var(
-            "SELECT COUNT(*) FROM {$wpdb->options} 
-             WHERE option_name LIKE '_transient_aiseo_keyword_suggestions_%'"
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s",
+                $wpdb->esc_like('_transient_aiseo_keyword_suggestions_') . '%'
+            )
         );
         
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table, no WP equivalent
         $cached_related = $wpdb->get_var(
-            "SELECT COUNT(*) FROM {$wpdb->options} 
-             WHERE option_name LIKE '_transient_aiseo_related_keywords_%'"
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s",
+                $wpdb->esc_like('_transient_aiseo_related_keywords_') . '%'
+            )
         );
         
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table, no WP equivalent
         $cached_difficulty = $wpdb->get_var(
-            "SELECT COUNT(*) FROM {$wpdb->options} 
-             WHERE option_name LIKE '_transient_aiseo_keyword_difficulty_%'"
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s",
+                $wpdb->esc_like('_transient_aiseo_keyword_difficulty_') . '%'
+            )
         );
         
         return [
@@ -442,9 +414,11 @@ class AISEO_Keyword_Research {
         
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table for keyword data
         $deleted = $wpdb->query(
-            "DELETE FROM {$wpdb->options} 
-             WHERE option_name LIKE '_transient_aiseo_keyword_%' 
-             OR option_name LIKE '_transient_timeout_aiseo_keyword_%'"
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+                $wpdb->esc_like('_transient_aiseo_keyword_') . '%',
+                $wpdb->esc_like('_transient_timeout_aiseo_keyword_') . '%'
+            )
         );
         
         return (int) $deleted;

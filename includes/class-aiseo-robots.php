@@ -44,14 +44,20 @@ class AISEO_Robots {
         'noindex_attachment_pages' => true,
         'add_noodp' => false,
         'add_noydir' => false,
+        'block_ai_crawlers' => false,
+        'noindex_out_of_stock' => false,
     );
     
     /**
      * Initialize robots settings
      */
     public function init() {
-        // Output robots meta tag
-        add_action('wp_head', array($this, 'output_robots_meta'), 1);
+        add_filter('wp_robots', array($this, 'filter_wp_robots'), 20);
+        add_filter('robots_txt', array($this, 'block_ai_crawlers'), 15, 2);
+        add_filter('robots_txt', array($this, 'woocommerce_paths'), 16, 2);
+        add_filter('robots_txt', array($this, 'append_extra_rules'), 30, 2);
+        add_action('template_redirect', array($this, 'redirect_attachment_page'), 1);
+        add_action('pre_get_posts', array($this, 'exclude_noindex_from_feed'));
         
         // Filter external links
         add_filter('the_content', array($this, 'filter_external_links'), 99);
@@ -90,109 +96,349 @@ class AISEO_Robots {
     /**
      * Output robots meta tag
      */
-    public function output_robots_meta() {
-        // Skip if singular (handled by per-post settings)
+    public function filter_wp_robots($robots) {
+        if (is_404()) {
+            $robots['noindex'] = true;
+            return $robots;
+        }
+        if (function_exists('is_cart') && (is_cart() || is_checkout() || is_account_page())) {
+            $robots['noindex'] = true;
+            $robots['nofollow'] = true;
+            return $robots;
+        }
         if (is_singular() && !is_attachment()) {
-            return;
+            return $robots;
         }
         
         $settings = $this->get_settings();
-        $robots = array();
+        $directives = array();
         
         // Check page type and apply settings
         if (is_category()) {
             if ($settings['noindex_categories']) {
-                $robots[] = 'noindex';
+                $directives[] = 'noindex';
             }
             if ($settings['nofollow_categories']) {
-                $robots[] = 'nofollow';
+                $directives[] = 'nofollow';
             }
             
             // Check for empty taxonomy
             if ($settings['noindex_empty_taxonomies']) {
                 $term = get_queried_object();
                 if ($term && $term->count === 0) {
-                    $robots[] = 'noindex';
+                    $directives[] = 'noindex';
                 }
             }
         }
         
         if (is_tag()) {
             if ($settings['noindex_tags']) {
-                $robots[] = 'noindex';
+                $directives[] = 'noindex';
             }
             if ($settings['nofollow_tags']) {
-                $robots[] = 'nofollow';
+                $directives[] = 'nofollow';
             }
             
             // Check for empty taxonomy
             if ($settings['noindex_empty_taxonomies']) {
                 $term = get_queried_object();
                 if ($term && $term->count === 0) {
-                    $robots[] = 'noindex';
+                    $directives[] = 'noindex';
                 }
             }
         }
         
         if (is_author()) {
             if ($settings['noindex_author_archives']) {
-                $robots[] = 'noindex';
+                $directives[] = 'noindex';
+            }
+            $author = get_queried_object();
+            if ($author instanceof WP_User) {
+                $author_noindex = get_user_meta($author->ID, '_aiseo_noindex', true);
+                if (in_array($author_noindex, array(true, 1, '1'), true)) {
+                    $directives[] = 'noindex';
+                }
             }
             if ($settings['nofollow_author_archives']) {
-                $robots[] = 'nofollow';
+                $directives[] = 'nofollow';
             }
         }
         
         if (is_date()) {
             if ($settings['noindex_date_archives']) {
-                $robots[] = 'noindex';
+                $directives[] = 'noindex';
             }
             if ($settings['nofollow_date_archives']) {
-                $robots[] = 'nofollow';
+                $directives[] = 'nofollow';
             }
         }
         
         if (is_search()) {
             if ($settings['noindex_search_results']) {
-                $robots[] = 'noindex';
+                $directives[] = 'noindex';
+            } else {
+                unset($robots['noindex']);
             }
         }
         
         if (is_attachment()) {
             if ($settings['noindex_attachment_pages']) {
-                $robots[] = 'noindex';
+                $directives[] = 'noindex';
             }
         }
         
-        // Check for paginated pages
         if (is_paged() && $settings['noindex_paginated']) {
-            $robots[] = 'noindex';
+            $directives[] = 'noindex';
+        }
+
+        if (function_exists('is_shop') && (is_shop() || is_product_taxonomy())) {
+            if (isset($_GET['orderby']) || isset($_GET['min_price']) || isset($_GET['max_price']) || isset($_GET['filtering'])) {
+                $directives[] = 'noindex';
+            }
         }
         
-        // Add deprecated directives if enabled
         if ($settings['add_noodp']) {
-            $robots[] = 'noodp';
+            $directives[] = 'noodp';
         }
         if ($settings['add_noydir']) {
-            $robots[] = 'noydir';
+            $directives[] = 'noydir';
         }
         
-        // Remove duplicates and output
-        $robots = array_unique($robots);
+        foreach (array_unique($directives) as $directive) {
+            $robots[$directive] = true;
+            if ($directive === 'noindex') {
+                unset($robots['index']);
+            }
+            if ($directive === 'nofollow') {
+                unset($robots['follow']);
+            }
+        }
         
-        if (!empty($robots)) {
-            // Add index/follow defaults if not set
-            if (!in_array('noindex', $robots)) {
-                array_unshift($robots, 'index');
+        return $robots;
+    }
+
+    /**
+     * Optionally refuse known AI training crawlers in robots.txt.
+     *
+     * @param string $output Existing robots.txt body.
+     * @param bool   $public Whether the site is public.
+     * @return string
+     */
+    /**
+     * Known AI training crawlers, matching Yoast-style bot lists.
+     *
+     * @return string[]
+     */
+    public function get_known_ai_crawlers() {
+        return array(
+            'GPTBot',
+            'ChatGPT-User',
+            'Google-Extended',
+            'Google-CloudVertexBot',
+            'ClaudeBot',
+            'anthropic-ai',
+            'CCBot',
+            'Bytespider',
+            'PerplexityBot',
+            'Applebot-Extended',
+            'meta-externalagent',
+            'FacebookBot',
+            'cohere-ai',
+            'Diffbot',
+            'Amazonbot',
+        );
+    }
+
+    /**
+     * Agents selected in Settings. Empty means all known agents (legacy).
+     *
+     * @return string[]
+     */
+    public function get_blocked_ai_crawlers() {
+        $known = $this->get_known_ai_crawlers();
+        $saved = get_option('aiseo_blocked_ai_agents', array());
+        if (!is_array($saved) || !$saved) {
+            return $known;
+        }
+        return array_values(array_intersect($saved, $known));
+    }
+
+    /**
+     * @param string[] $agents Posted agent names.
+     */
+    public function save_blocked_ai_crawlers($agents) {
+        if (!is_array($agents)) {
+            $agents = array();
+        }
+        $agents = array_values(array_intersect($agents, $this->get_known_ai_crawlers()));
+        if (!$agents) {
+            delete_option('aiseo_blocked_ai_agents');
+            return;
+        }
+        update_option('aiseo_blocked_ai_agents', $agents);
+    }
+
+    public function block_ai_crawlers($output, $public) {
+        $settings = $this->get_settings();
+        if (empty($settings['block_ai_crawlers'])) {
+            return $output;
+        }
+        $agents = $this->get_blocked_ai_crawlers();
+        if (!$agents) {
+            return $output;
+        }
+        $block = "\n# AI crawlers (Praison AI SEO)\n";
+        foreach ($agents as $agent) {
+            $block .= 'User-agent: ' . $agent . "\nDisallow: /\n\n";
+        }
+        return rtrim((string) $output) . "\n" . $block;
+    }
+
+    /**
+     * Keep WooCommerce cart, checkout, and account URLs out of crawlers.
+     *
+     * @param string $output Existing robots.txt body.
+     * @param bool   $public Whether the site is public.
+     * @return string
+     */
+    public function woocommerce_paths($output, $public) {
+        if (!$public || !function_exists('wc_get_page_id')) {
+            return $output;
+        }
+        $paths = array();
+        foreach (array('cart', 'checkout', 'myaccount') as $page) {
+            $page_id = (int) wc_get_page_id($page);
+            if ($page_id < 1) {
+                continue;
             }
-            if (!in_array('nofollow', $robots)) {
-                $robots[] = 'follow';
+            $permalink = get_permalink($page_id);
+            $path = is_string($permalink) ? wp_parse_url($permalink, PHP_URL_PATH) : '';
+            if (!is_string($path) || $path === '' || $path === '/') {
+                continue;
             }
-            
-            echo '<meta name="robots" content="' . esc_attr(implode(', ', $robots)) . '">' . "\n";
+            $paths[] = untrailingslashit($path) . '/';
+        }
+        $paths = array_unique($paths);
+        if (!$paths) {
+            return $output;
+        }
+        $block = "\n# WooCommerce (Praison AI SEO)\nUser-agent: *\n";
+        foreach ($paths as $path) {
+            $block .= 'Disallow: ' . $path . "\n";
+        }
+        return rtrim((string) $output) . "\n" . $block;
+    }
+
+    /**
+     * Extra robots.txt lines from Settings, like Yoast and Rank Math.
+     *
+     * @param string $output Existing body.
+     * @param bool   $public Whether the site is public.
+     * @return string
+     */
+    public function append_extra_rules($output, $public) {
+        if (!$public) {
+            return $output;
+        }
+        $extra = $this->get_extra_rules();
+        if ($extra === '') {
+            return $output;
+        }
+        return rtrim((string) $output) . "\n\n# Extra rules (Praison AI SEO)\n" . $extra . "\n";
+    }
+
+    /**
+     * @return string
+     */
+    public function get_extra_rules() {
+        $extra = get_option('aiseo_robots_extra', '');
+        return is_string($extra) ? $this->sanitize_extra_rules($extra) : '';
+    }
+
+    /**
+     * @param string $raw Posted or stored rules.
+     * @return string
+     */
+    public function sanitize_extra_rules($raw) {
+        $raw = sanitize_textarea_field($raw);
+        $raw = str_replace(array('<?', "\0"), '', $raw);
+        $lines = preg_split('/\r\n|\r|\n/', $raw);
+        $kept = array();
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                $kept[] = '';
+                continue;
+            }
+            if ($line[0] === '#') {
+                $kept[] = $line;
+                continue;
+            }
+            if (!preg_match('/^(User-agent|Disallow|Allow|Crawl-delay|Sitemap|Host)\s*:/i', $line)) {
+                continue;
+            }
+            $kept[] = $line;
+            if (count($kept) >= 80) {
+                break;
+            }
+        }
+        return trim(implode("\n", $kept));
+    }
+
+    /**
+     * Send attachment pages to the parent post, or to the file when there is no parent.
+     */
+    public function redirect_attachment_page() {
+        if (!is_attachment() || is_feed() || is_preview()) {
+            return;
+        }
+        $settings = $this->get_settings();
+        if (empty($settings['noindex_attachment_pages'])) {
+            return;
+        }
+        $attachment_id = get_queried_object_id();
+        if (!$attachment_id) {
+            return;
+        }
+        $parent_id = wp_get_post_parent_id($attachment_id);
+        $target = $parent_id ? get_permalink($parent_id) : wp_get_attachment_url($attachment_id);
+        if (!is_string($target) || $target === '') {
+            return;
+        }
+        if (wp_safe_redirect($target, 301)) {
+            exit;
         }
     }
-    
+
+    /**
+     * Keep noindex posts out of the RSS and Atom feeds.
+     *
+     * @param WP_Query $query Query.
+     */
+    public function exclude_noindex_from_feed($query) {
+        if (!$query instanceof WP_Query || is_admin() || !$query->is_main_query() || !$query->is_feed() || $query->is_comment_feed()) {
+            return;
+        }
+        $meta_query = $query->get('meta_query');
+        if (!is_array($meta_query)) {
+            $meta_query = array();
+        }
+        $meta_query[] = array(
+            'relation' => 'OR',
+            array(
+                'key' => '_aiseo_noindex',
+                'compare' => 'NOT EXISTS',
+            ),
+            array(
+                'key' => '_aiseo_noindex',
+                'value' => array('1', 'true'),
+                'compare' => 'NOT IN',
+            ),
+        );
+        $query->set('meta_query', $meta_query);
+        $query->set('has_password', false);
+    }
+
     /**
      * Filter external links to add nofollow
      *
@@ -200,53 +446,41 @@ class AISEO_Robots {
      * @return string Modified content
      */
     public function filter_external_links($content) {
-        $settings = $this->get_settings();
-        
-        if (!$settings['nofollow_external_links']) {
+        if (!is_string($content) || $content === '') {
             return $content;
         }
-        
-        // Get site URL for comparison
-        $site_url = home_url();
-        $site_host = wp_parse_url($site_url, PHP_URL_HOST);
-        
-        // Find all links
-        $pattern = '/<a\s+([^>]*href=["\']([^"\']+)["\'][^>]*)>/i';
-        
-        $content = preg_replace_callback($pattern, function($matches) use ($site_host) {
-            $full_tag = $matches[0];
-            $attributes = $matches[1];
-            $href = $matches[2];
-            
-            // Parse the URL
-            $link_host = wp_parse_url($href, PHP_URL_HOST);
-            
-            // Skip internal links and anchors
-            if (empty($link_host) || $link_host === $site_host) {
-                return $full_tag;
+        $settings = $this->get_settings();
+        if (empty($settings['nofollow_external_links'])) {
+            return $content;
+        }
+
+        $site_host = strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST));
+        return preg_replace_callback('/<a\b[^>]*>/i', function ($matches) use ($site_host) {
+            $tag = $matches[0];
+            if (!preg_match('/\bhref\s*=\s*(["\'])([^"\']+)\1/i', $tag, $href_match)) {
+                return $tag;
             }
-            
-            // Skip if already has rel attribute with nofollow
-            if (preg_match('/rel=["\'][^"\']*nofollow[^"\']*["\']/', $attributes)) {
-                return $full_tag;
+            $host = wp_parse_url(html_entity_decode($href_match[2], ENT_QUOTES), PHP_URL_HOST);
+            if (!is_string($host) || $host === '' || strtolower($host) === $site_host) {
+                return $tag;
             }
-            
-            // Add or modify rel attribute
-            if (preg_match('/rel=["\']([^"\']*)["\']/', $attributes)) {
-                // Append nofollow to existing rel
-                $new_tag = preg_replace(
-                    '/rel=["\']([^"\']*)["\']/',
-                    'rel="$1 nofollow noopener"',
-                    $full_tag
-                );
-            } else {
-                // Add new rel attribute
-                $new_tag = str_replace('<a ', '<a rel="nofollow noopener" ', $full_tag);
+            if (preg_match('/\brel\s*=\s*(["\'])([^"\']*)\1/i', $tag, $rel_match)) {
+                $rels = preg_split('/\s+/', trim($rel_match[2]));
+                if (!is_array($rels)) {
+                    $rels = array();
+                }
+                foreach (array('nofollow', 'noopener') as $rel) {
+                    if (!in_array($rel, $rels, true)) {
+                        $rels[] = $rel;
+                    }
+                }
+                $rels = array_values(array_filter($rels, 'strlen'));
+                $new_rel = 'rel=' . $rel_match[1] . implode(' ', $rels) . $rel_match[1];
+                $updated = preg_replace('/\brel\s*=\s*(["\'])([^"\']*)\1/i', $new_rel, $tag, 1);
+                return is_string($updated) ? $updated : $tag;
             }
-            
-            return $new_tag;
+            $updated = preg_replace('/<a\b/i', '<a rel="nofollow noopener"', $tag, 1);
+            return is_string($updated) ? $updated : $tag;
         }, $content);
-        
-        return $content;
     }
 }

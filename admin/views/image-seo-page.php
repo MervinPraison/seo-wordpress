@@ -9,6 +9,8 @@
 if (!defined('ABSPATH')) {
     exit;
 }
+
+function aiseo_render_image_seo_page_view($images, $total_images) {
 ?>
 
 <div class="wrap aiseo-image-seo-page">
@@ -18,11 +20,11 @@ if (!defined('ABSPATH')) {
     <div class="aiseo-image-stats">
         <div class="stat-box">
             <h3><?php esc_html_e('Total Images', 'aiseo'); ?></h3>
-            <p class="stat-number"><?php echo number_format($total_images); ?></p>
+            <p class="stat-number"><?php echo esc_html(number_format_i18n($total_images)); ?></p>
         </div>
         <div class="stat-box">
             <h3><?php esc_html_e('Missing Alt Text', 'aiseo'); ?></h3>
-            <p class="stat-number warning"><?php echo number_format(count($images)); ?></p>
+            <p class="stat-number warning"><?php echo esc_html(number_format_i18n(count($images))); ?></p>
         </div>
         <div class="stat-box">
             <h3><?php esc_html_e('AI Generated', 'aiseo'); ?></h3>
@@ -31,7 +33,7 @@ if (!defined('ABSPATH')) {
                 global $wpdb;
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Counting AI-generated alt texts
                 $ai_generated = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = '_aiseo_ai_generated_alt' AND meta_value = '1'");
-                echo number_format($ai_generated);
+                echo esc_html(number_format_i18n((int) $ai_generated));
                 ?>
             </p>
         </div>
@@ -114,3 +116,5 @@ if (!defined('ABSPATH')) {
         <button class="button" id="cancel-bulk"><?php esc_html_e('Cancel', 'aiseo'); ?></button>
     </div>
 </div>
+<?php
+}

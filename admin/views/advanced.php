@@ -8,7 +8,52 @@
 
 if (!defined('ABSPATH')) exit;
 
+function aiseo_render_advanced_view() {
+
+if (isset($_POST['aiseo_cpt_form']) && current_user_can('aiseo_manage_settings') && check_admin_referer('aiseo_cpt_settings')) {
+    $allowed = get_post_types(array('public' => true), 'names');
+    unset($allowed['attachment']);
+    $saved_types = array();
+    $posted_types = isset($_POST['aiseo_cpt']) ? wp_unslash($_POST['aiseo_cpt']) : array();
+    if (is_array($posted_types)) {
+        foreach ($posted_types as $posted_type) {
+            $posted_type = sanitize_key($posted_type);
+            if (isset($allowed[$posted_type])) {
+                $saved_types[] = $posted_type;
+            }
+        }
+    }
+    update_option('aiseo_sitemap_post_types', $saved_types);
+    update_option('aiseo_enabled_post_types', $saved_types);
+
+    $allowed_taxes = get_taxonomies(array('public' => true, 'publicly_queryable' => true), 'names');
+    unset($allowed_taxes['post_format']);
+    $saved_taxes = array();
+    $posted_taxes = isset($_POST['aiseo_sitemap_taxonomies']) ? wp_unslash($_POST['aiseo_sitemap_taxonomies']) : array();
+    if (is_array($posted_taxes)) {
+        foreach ($posted_taxes as $posted_tax) {
+            $posted_tax = sanitize_key($posted_tax);
+            if (isset($allowed_taxes[$posted_tax])) {
+                $saved_taxes[] = $posted_tax;
+            }
+        }
+    }
+    update_option('aiseo_sitemap_taxonomies', $saved_taxes);
+    echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Sitemap inclusion settings saved.', 'aiseo') . '</p></div>';
+}
+
 $post_types = get_post_types(array('public' => true), 'objects');
+unset($post_types['attachment']);
+$enabled_types = get_option('aiseo_sitemap_post_types', null);
+if (!is_array($enabled_types)) {
+    $enabled_types = array_keys($post_types);
+}
+$taxonomy_objects = get_taxonomies(array('public' => true, 'publicly_queryable' => true), 'objects');
+unset($taxonomy_objects['post_format']);
+$enabled_taxes = get_option('aiseo_sitemap_taxonomies', null);
+if (!is_array($enabled_taxes)) {
+    $enabled_taxes = array_keys($taxonomy_objects);
+}
 ?>
 
 <div class="aiseo-advanced">
@@ -22,20 +67,32 @@ $post_types = get_post_types(array('public' => true), 'objects');
                 <h3 class="aiseo-card-title"><?php esc_html_e('Enable SEO for Custom Post Types', 'aiseo'); ?></h3>
             </div>
             <div class="aiseo-card-body">
-                <p><?php esc_html_e('Select which post types should have SEO features:', 'aiseo'); ?></p>
+                <p><?php esc_html_e('Select which post types appear in the XML sitemap and get the SEO metabox:', 'aiseo'); ?></p>
                 <form method="post">
                     <?php wp_nonce_field('aiseo_cpt_settings'); ?>
+                    <input type="hidden" name="aiseo_cpt_form" value="1" />
                     <?php foreach ($post_types as $post_type): ?>
                         <div class="aiseo-form-group">
                             <label>
-                                <input type="checkbox" name="aiseo_cpt[]" value="<?php echo esc_attr($post_type->name); ?>" checked>
+                                <input type="checkbox" name="aiseo_cpt[]" value="<?php echo esc_attr($post_type->name); ?>" <?php checked(in_array($post_type->name, $enabled_types, true)); ?>>
                                 <strong><?php echo esc_html($post_type->label); ?></strong>
-                                <span style="color: #666;">(<?php echo esc_html($post_type->name); ?>)</span>
+                                <span class="aiseo-muted">(<?php echo esc_html($post_type->name); ?>)</span>
+                            </label>
+                        </div>
+                    <?php endforeach; ?>
+                    <h4><?php esc_html_e('Taxonomies in the XML sitemap', 'aiseo'); ?></h4>
+                    <p><?php esc_html_e('Uncheck a taxonomy to omit its archive URLs from the sitemap. Noindex settings still take priority.', 'aiseo'); ?></p>
+                    <?php foreach ($taxonomy_objects as $taxonomy) : ?>
+                        <div class="aiseo-form-group">
+                            <label>
+                                <input type="checkbox" name="aiseo_sitemap_taxonomies[]" value="<?php echo esc_attr($taxonomy->name); ?>" <?php checked(in_array($taxonomy->name, $enabled_taxes, true)); ?>>
+                                <strong><?php echo esc_html($taxonomy->label); ?></strong>
+                                <span class="aiseo-muted">(<?php echo esc_html($taxonomy->name); ?>)</span>
                             </label>
                         </div>
                     <?php endforeach; ?>
                     <button type="submit" class="button button-primary aiseo-mt-20">
-                        <?php esc_html_e('Save Post Type Settings', 'aiseo'); ?>
+                        <?php esc_html_e('Save sitemap inclusion', 'aiseo'); ?>
                     </button>
                 </form>
                 <p class="aiseo-mt-20"><strong><?php esc_html_e('CLI Commands:', 'aiseo'); ?></strong><br>
@@ -66,11 +123,11 @@ $post_types = get_post_types(array('public' => true), 'objects');
                         <div class="aiseo-stat-label"><?php esc_html_e('TranslatePress', 'aiseo'); ?></div>
                     </div>
                 </div>
-                <ul style="list-style: disc; padding-left: 20px; margin-top: 20px;">
+                <ul class="aiseo-list-compact aiseo-mt-20">
                     <li><?php esc_html_e('Automatic language detection', 'aiseo'); ?></li>
                     <li><?php esc_html_e('Per-language meta tags', 'aiseo'); ?></li>
                     <li><?php esc_html_e('Hreflang tag generation', 'aiseo'); ?></li>
-                    <li><?php esc_html_e('Language-specific sitemaps', 'aiseo'); ?></li>
+                    <li><?php esc_html_e('Hreflang on posts, pages, and translated archives', 'aiseo'); ?></li>
                 </ul>
                 <p class="aiseo-mt-20"><strong><?php esc_html_e('CLI Commands:', 'aiseo'); ?></strong><br>
                 <code>wp aiseo multilingual status</code><br>
@@ -129,15 +186,15 @@ $post_types = get_post_types(array('public' => true), 'objects');
             <div class="aiseo-card-body">
                 <p><?php esc_html_e('AI-powered keyword research and suggestions:', 'aiseo'); ?></p>
                 <ul style="list-style: disc; padding-left: 20px;">
-                    <li><?php esc_html_e('Keyword suggestions', 'aiseo'); ?></li>
-                    <li><?php esc_html_e('Search volume estimates', 'aiseo'); ?></li>
+                    <li><?php esc_html_e('Keyword suggestions from your AI provider', 'aiseo'); ?></li>
+                    <li><?php esc_html_e('Search volume when a data provider is connected', 'aiseo'); ?></li>
                     <li><?php esc_html_e('Difficulty scores', 'aiseo'); ?></li>
                     <li><?php esc_html_e('Related keywords', 'aiseo'); ?></li>
                     <li><?php esc_html_e('Long-tail variations', 'aiseo'); ?></li>
                 </ul>
                 <div class="aiseo-form-group aiseo-mt-20">
                     <input type="text" id="aiseo-keyword-input" class="large-text" placeholder="<?php esc_attr_e('Enter a keyword...', 'aiseo'); ?>">
-                    <button type="button" class="button button-primary" style="margin-top: 10px;">
+                    <button type="button" class="button button-primary" id="aiseo-research-keyword" style="margin-top: 10px;">
                         <span class="dashicons dashicons-search"></span>
                         <?php esc_html_e('Research Keyword', 'aiseo'); ?>
                     </button>
@@ -152,6 +209,57 @@ $post_types = get_post_types(array('public' => true), 'objects');
         </div>
     </div>
     
+    <div class="aiseo-form-section">
+        <h2 class="aiseo-section-title"><?php esc_html_e('Role manager', 'aiseo'); ?></h2>
+        <div class="aiseo-card">
+            <div class="aiseo-card-header">
+                <h3 class="aiseo-card-title"><?php esc_html_e('Who can change AISEO settings', 'aiseo'); ?></h3>
+            </div>
+            <div class="aiseo-card-body">
+                <p><?php esc_html_e('Administrators always have access. Grant other roles the same settings and redirect tools Rank Math exposes in its free role manager.', 'aiseo'); ?></p>
+                <?php
+                settings_errors('aiseo_roles');
+                $aiseo_roles = class_exists('AISEO_Roles') ? new AISEO_Roles() : null;
+                $wp_roles = wp_roles();
+                ?>
+                <?php if ($aiseo_roles && $wp_roles) : ?>
+                    <form method="post">
+                        <?php wp_nonce_field('aiseo_roles_settings'); ?>
+                        <table class="widefat striped">
+                            <thead>
+                                <tr>
+                                    <th scope="col"><?php esc_html_e('Role', 'aiseo'); ?></th>
+                                    <?php foreach ($aiseo_roles->capabilities() as $cap_label) : ?>
+                                        <th scope="col"><?php echo esc_html($cap_label); ?></th>
+                                    <?php endforeach; ?>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($wp_roles->role_objects as $role_key => $role) : ?>
+                                    <tr>
+                                        <th scope="row"><?php echo esc_html($wp_roles->role_names[$role_key]); ?></th>
+                                        <?php foreach (array_keys($aiseo_roles->capabilities()) as $cap) : ?>
+                                            <td>
+                                                <?php if ($role_key === 'administrator') : ?>
+                                                    <input type="checkbox" checked disabled />
+                                                <?php else : ?>
+                                                    <input type="checkbox" name="<?php echo esc_attr('aiseo_role_caps[' . $role_key . '][]'); ?>" value="<?php echo esc_attr($cap); ?>" <?php checked($role->has_cap($cap)); ?> />
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endforeach; ?>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        <p>
+                            <button type="submit" name="aiseo_roles_submit" class="button button-primary aiseo-mt-20"><?php esc_html_e('Save role access', 'aiseo'); ?></button>
+                        </p>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
     <!-- Content Briefs -->
     <div class="aiseo-form-section">
         <h2 class="aiseo-section-title"><?php esc_html_e('Content Briefs', 'aiseo'); ?></h2>
@@ -203,345 +311,6 @@ $post_types = get_post_types(array('public' => true), 'objects');
     
 </div>
 
-<script>
-jQuery(document).ready(function($) {
-    // CPT settings form
-    $('.aiseo-advanced form').on('submit', function(e) {
-        e.preventDefault();
-        var $form = $(this);
-        var $btn = $form.find('button[type="submit"]');
-        
-        $btn.prop('disabled', true).text('Saving...');
-        
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: $form.serialize() + '&action=aiseo_save_cpt_settings&nonce=' + aiseoAdmin.nonce,
-            success: function(response) {
-                if (response.success) {
-                    alert('Settings saved successfully!');
-                } else {
-                    alert('Error: ' + response.data);
-                }
-            },
-            complete: function() {
-                $btn.prop('disabled', false).text('<?php esc_html_e('Save Post Type Settings', 'aiseo'); ?>');
-            }
-        });
-    });
-    
-    // Generate report
-    $('.aiseo-advanced button:contains("Generate Full Report")').on('click', function() {
-        var $btn = $(this);
-        $btn.prop('disabled', true).text('Generating...');
-        
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'aiseo_generate_report',
-                nonce: aiseoAdmin.nonce
-            },
-            success: function(response) {
-                if (response.success) {
-                    var report = response.data;
-                    var html = '<div style="background:#fff;padding:20px;border:1px solid #ddd;border-radius:5px;">';
-                    html += '<h3 style="margin-top:0;">SEO Report</h3>';
-                    html += '<div class="aiseo-stat-grid">';
-                    html += '<div class="aiseo-stat-item"><div class="aiseo-stat-value">' + report.generated_at + '</div><div class="aiseo-stat-label">Generated</div></div>';
-                    html += '<div class="aiseo-stat-item"><div class="aiseo-stat-value">' + report.posts_analyzed + '</div><div class="aiseo-stat-label">Posts Analyzed</div></div>';
-                    html += '<div class="aiseo-stat-item"><div class="aiseo-stat-value">' + report.metadata_generated + '</div><div class="aiseo-stat-label">Metadata Generated</div></div>';
-                    html += '<div class="aiseo-stat-item"><div class="aiseo-stat-value">' + report.ai_posts_created + '</div><div class="aiseo-stat-label">AI Posts Created</div></div>';
-                    html += '<div class="aiseo-stat-item"><div class="aiseo-stat-value">' + report.api_requests + '</div><div class="aiseo-stat-label">API Requests</div></div>';
-                    html += '</div>';
-                    
-                    if (report.recent_scores) {
-                        html += '<h4>Recent Post Scores:</h4><table class="wp-list-table widefat fixed striped"><thead><tr><th>Post Title</th><th>SEO Score</th></tr></thead><tbody>';
-                        $.each(report.recent_scores, function(i, item) {
-                            html += '<tr><td>' + item.title + '</td><td>' + item.score + '</td></tr>';
-                        });
-                        html += '</tbody></table>';
-                    }
-                    html += '</div>';
-                    
-                    $('#aiseo-report-content').html(html);
-                    $('#aiseo-report-section').show();
-                    $('html, body').animate({scrollTop: $('#aiseo-report-section').offset().top - 100}, 500);
-                    
-                    // Store report data for PDF
-                    $('#aiseo-download-pdf').data('report', report);
-                } else {
-                    $('#aiseo-report-content').html('<p style="color:red;">Error: ' + response.data + '</p>');
-                    $('#aiseo-report-section').show();
-                }
-            },
-            complete: function() {
-                $btn.prop('disabled', false).html('<span class="dashicons dashicons-chart-bar"></span> <?php esc_html_e('Generate Full Report', 'aiseo'); ?>');
-            }
-        });
-    });
-    // Keyword research
-    $('.aiseo-advanced button:contains("Research Keyword")').on('click', function() {
-        var $btn = $(this);
-        var keyword = $('#aiseo-keyword-input').val();
-        var $resultDiv = $('<div class="aiseo-result-box" style="margin-top:20px;"></div>').insertAfter($btn.parent());
-        
-        if (!keyword) {
-            $resultDiv.html('<p style="color:red;">Please enter a keyword</p>').show();
-            return;
-        }
-        
-        $btn.prop('disabled', true).text('Researching...');
-        
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'aiseo_keyword_research',
-                nonce: aiseoAdmin.nonce,
-                keyword: keyword
-            },
-            success: function(response) {
-                if (response.success) {
-                    var html = '<div style="background:#f0f0f0;padding:15px;border-radius:5px;"><h4>Keyword Suggestions for: ' + response.data.keyword + '</h4><ul style="list-style:disc;padding-left:20px;">';
-                    $.each(response.data.suggestions, function(i, kw) {
-                        html += '<li>' + kw + '</li>';
-                    });
-                    html += '</ul></div>';
-                    $resultDiv.html(html).show();
-                } else {
-                    $resultDiv.html('<p style="color:red;">Error: ' + response.data + '</p>').show();
-                }
-            },
-            complete: function() {
-                $btn.prop('disabled', false).html('<span class="dashicons dashicons-search"></span> <?php esc_html_e('Research Keyword', 'aiseo'); ?>');
-            }
-        });
-    });
-    
-    // Generate report
-    $('#aiseo-generate-report').on('click', function() {
-        var $btn = $(this);
-        var $resultDiv = $('#aiseo-report-results');
-        
-        $btn.prop('disabled', true).text('Generating...');
-        $resultDiv.html('');
-        
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'aiseo_generate_report',
-                nonce: aiseoAdmin.nonce
-            },
-            success: function(response) {
-                if (response.success) {
-                    var html = '<div style="background:#f0f0f0;padding:20px;border-radius:5px;">';
-                    html += '<h3>SEO Report Generated</h3>';
-                    html += '<table class="wp-list-table widefat"><tr><th>Metric</th><th>Value</th></tr>';
-                    html += '<tr><td>Posts Analyzed</td><td>' + response.data.posts_analyzed + '</td></tr>';
-                    html += '<tr><td>Metadata Generated</td><td>' + response.data.metadata_generated + '</td></tr>';
-                    html += '<tr><td>AI Posts Created</td><td>' + response.data.ai_posts_created + '</td></tr>';
-                    html += '<tr><td>API Requests</td><td>' + response.data.api_requests + '</td></tr></table>';
-                    html += '</div>';
-                    $resultDiv.html(html).show();
-                    
-                    // Store report data for PDF download
-                    $('#aiseo-download-pdf').data('report', response.data);
-                    $('#aiseo-download-pdf').prop('disabled', false);
-                } else {
-                    $resultDiv.html('<div class="notice notice-error" style="padding:10px;"><strong>Error:</strong> ' + response.data + '</div>').show();
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('Report generation error:', xhr, status, error);
-                $resultDiv.html('<div class="notice notice-error" style="padding:10px;"><strong>Error:</strong> ' + error + '</div>').show();
-            },
-            complete: function() {
-                $btn.prop('disabled', false).html('<span class="dashicons dashicons-chart-bar"></span> <?php esc_html_e('Generate Full Report', 'aiseo'); ?>');
-            }
-        });
-    });
-    
-    // PDF Download
-    $('#aiseo-download-pdf').on('click', function() {
-        var report = $(this).data('report');
-        if (!report) {
-            $(this).after('<p style="color:red;margin-top:10px;">No report data available</p>');
-            return;
-        }
-        
-        // Create PDF-style HTML content
-        var pdfContent = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>AISEO Report</title>';
-        pdfContent += '<style>body{font-family:Arial,sans-serif;padding:40px;}h1{color:#0073aa;}table{width:100%;border-collapse:collapse;margin:20px 0;}th,td{padding:10px;border:1px solid #ddd;text-align:left;}th{background:#0073aa;color:white;}</style>';
-        pdfContent += '</head><body>';
-        pdfContent += '<h1>AISEO SEO Report</h1>';
-        pdfContent += '<p><strong>Generated:</strong> ' + report.generated_at + '</p>';
-        pdfContent += '<table><tr><th>Metric</th><th>Value</th></tr>';
-        pdfContent += '<tr><td>Posts Analyzed</td><td>' + report.posts_analyzed + '</td></tr>';
-        pdfContent += '<tr><td>Metadata Generated</td><td>' + report.metadata_generated + '</td></tr>';
-        pdfContent += '<tr><td>AI Posts Created</td><td>' + report.ai_posts_created + '</td></tr>';
-        pdfContent += '<tr><td>API Requests</td><td>' + report.api_requests + '</td></tr></table>';
-        
-        if (report.recent_scores) {
-            pdfContent += '<h2>Recent Post Scores</h2><table><tr><th>Post Title</th><th>SEO Score</th></tr>';
-            $.each(report.recent_scores, function(i, item) {
-                pdfContent += '<tr><td>' + item.title + '</td><td>' + item.score + '</td></tr>';
-            });
-            pdfContent += '</table>';
-        }
-        
-        pdfContent += '</body></html>';
-        
-        // Create blob and download
-        var blob = new Blob([pdfContent], {type: 'text/html'});
-        var url = window.URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = 'aiseo-report-' + Date.now() + '.html';
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        
-        $(this).after('<p style="color:green;margin-top:10px;">✓ Report downloaded! (Open in browser and print to PDF)</p>').next().delay(3000).fadeOut();
-    });
-    
-    // Content Brief Generator
-    $('#aiseo-brief-form').on('submit', function(e) {
-        e.preventDefault();
-        
-        var $form = $(this);
-        var $btn = $('#aiseo-generate-brief');
-        var topic = $form.find('[name="topic"]').val();
-        var keyword = $form.find('[name="keyword"]').val();
-        
-        if (!topic) {
-            alert('<?php esc_html_e('Please enter a topic', 'aiseo'); ?>');
-            return;
-        }
-        
-        $btn.prop('disabled', true).html('<span class="dashicons dashicons-update dashicons-spin"></span> <?php esc_html_e('Generating Brief...', 'aiseo'); ?>');
-        
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'aiseo_generate_brief',
-                topic: topic,
-                keyword: keyword,
-                nonce: aiseoAdmin.nonce
-            },
-            success: function(response) {
-                if (response.success && response.data) {
-                    var brief = response.data;
-                    var html = '<div class="content-brief">';
-                    
-                    // Title
-                    if (brief.title) {
-                        html += '<h3 style="margin-top:0;color:#0073aa;">' + brief.title + '</h3>';
-                    }
-                    
-                    // Target Keywords
-                    if (brief.keywords && brief.keywords.length > 0) {
-                        html += '<div style="margin-bottom:15px;"><strong>🎯 Target Keywords:</strong><br>';
-                        html += '<span style="background:#e3f2fd;padding:5px 10px;border-radius:3px;display:inline-block;margin:5px 5px 0 0;">' + brief.keywords.join('</span> <span style="background:#e3f2fd;padding:5px 10px;border-radius:3px;display:inline-block;margin:5px 5px 0 0;">') + '</span></div>';
-                    }
-                    
-                    // Word Count
-                    if (brief.word_count) {
-                        html += '<div style="margin-bottom:15px;"><strong>📝 Recommended Word Count:</strong> ' + brief.word_count + ' words</div>';
-                    }
-                    
-                    // Content Structure
-                    if (brief.structure && brief.structure.length > 0) {
-                        html += '<div style="margin-bottom:15px;"><strong>📋 Content Structure:</strong><ol style="margin:10px 0 0 20px;">';
-                        $.each(brief.structure, function(i, section) {
-                            html += '<li style="margin-bottom:5px;">' + section + '</li>';
-                        });
-                        html += '</ol></div>';
-                    }
-                    
-                    // Key Topics
-                    if (brief.key_topics && brief.key_topics.length > 0) {
-                        html += '<div style="margin-bottom:15px;"><strong>💡 Key Topics to Cover:</strong><ul style="margin:10px 0 0 20px;">';
-                        $.each(brief.key_topics, function(i, topic) {
-                            html += '<li style="margin-bottom:5px;">' + topic + '</li>';
-                        });
-                        html += '</ul></div>';
-                    }
-                    
-                    // SEO Tips
-                    if (brief.seo_tips) {
-                        html += '<div style="margin-bottom:15px;"><strong>🔍 SEO Tips:</strong><p style="margin:5px 0;">' + brief.seo_tips + '</p></div>';
-                    }
-                    
-                    html += '</div>';
-                    
-                    $('#aiseo-brief-results').show().find('.aiseo-result-content').html(html);
-                    // Show Create Post button
-                    $('.aiseo-create-post-from-brief').show();
-                } else {
-                    var errorMsg = response.data || 'Failed to generate brief';
-                    $('#aiseo-brief-results').show().find('.aiseo-result-content').html('<p style="color:red;">Error: ' + errorMsg + '</p>');
-                    $('.aiseo-create-post-from-brief').hide();
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('Brief Error:', xhr, status, error);
-                $('#aiseo-brief-results').show().find('.aiseo-result-content').html('<p style="color:red;">Connection error: ' + error + '</p>');
-                $('.aiseo-create-post-from-brief').hide();
-            },
-            complete: function() {
-                $btn.prop('disabled', false).html('<span class="dashicons dashicons-edit-page"></span> <?php esc_html_e('Generate Content Brief', 'aiseo'); ?>');
-            }
-        });
-    });
-    
-    // Create Post from Brief
-    $('.aiseo-create-post-from-brief').on('click', function() {
-        var $btn = $(this);
-        var briefContent = $('#aiseo-brief-results .aiseo-result-content').html();
-        var topic = $('#aiseo-brief-form [name="topic"]').val();
-        
-        if (!briefContent) {
-            alert('No brief content to create post from');
-            return;
-        }
-        
-        $btn.prop('disabled', true).text('Creating Post...');
-        
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            timeout: 30000,
-            data: {
-                action: 'aiseo_create_post',
-                nonce: aiseoAdmin.nonce,
-                topic: topic || 'Generated from Content Brief',
-                content: briefContent,
-                post_type: 'post',
-                length: 'medium'
-            },
-            success: function(response) {
-                if (response.success) {
-                    $btn.after('<div class="notice notice-success" style="margin:10px 0;padding:10px;"><strong>Success!</strong> Post created! <a href="' + response.data.edit_url + '" target="_blank">Edit post</a></div>');
-                } else {
-                    $btn.after('<div class="notice notice-error" style="margin:10px 0;padding:10px;"><strong>Error:</strong> ' + response.data + '</div>');
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('Create Post Error:', xhr, status, error);
-                var errorMsg = 'Connection error';
-                if (status === 'timeout') {
-                    errorMsg = 'Request timed out (30s). The post may still be creating in the background.';
-                }
-                $btn.after('<div class="notice notice-error" style="margin:10px 0;padding:10px;"><strong>Error:</strong> ' + errorMsg + '</div>');
-            },
-            complete: function() {
-                $btn.prop('disabled', false).html('<span class="dashicons dashicons-plus"></span> <?php esc_html_e('Create Post from Brief', 'aiseo'); ?>');
-            }
-        });
-    });
-});
-</script>
+<?php
+}
+aiseo_render_advanced_view();

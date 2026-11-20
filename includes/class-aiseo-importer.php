@@ -64,7 +64,10 @@ class AISEO_Importer {
         // Check for old plugin post meta
         global $wpdb;
         $count = $wpdb->get_var(
-            "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key LIKE '_praison_seo_%'"
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key LIKE %s",
+                $wpdb->esc_like('_praison_seo_') . '%'
+            )
         );
         
         return $count > 0;
@@ -379,7 +382,10 @@ class AISEO_Importer {
         
         // Delete old post meta
         $deleted = $wpdb->query(
-            "DELETE FROM {$wpdb->postmeta} WHERE meta_key LIKE '_praison_seo_%'"
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->postmeta} WHERE meta_key LIKE %s",
+                $wpdb->esc_like('_praison_seo_') . '%'
+            )
         );
         $results['meta_deleted'] = $deleted;
         

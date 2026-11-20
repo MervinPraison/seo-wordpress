@@ -129,14 +129,16 @@ class AISEO_Bulk_Edit {
             }
             
             if (isset($update['robots_index'])) {
-                $robots_index = in_array($update['robots_index'], ['index', 'noindex']) ? $update['robots_index'] : 'index';
+                $robots_index = in_array($update['robots_index'], array('index', 'noindex'), true) ? $update['robots_index'] : 'index';
                 update_post_meta($post_id, '_aiseo_robots_index', $robots_index);
+                update_post_meta($post_id, '_aiseo_noindex', $robots_index === 'noindex' ? '1' : '0');
                 $updated_fields[] = 'robots_index';
             }
             
             if (isset($update['robots_follow'])) {
-                $robots_follow = in_array($update['robots_follow'], ['follow', 'nofollow']) ? $update['robots_follow'] : 'follow';
+                $robots_follow = in_array($update['robots_follow'], array('follow', 'nofollow'), true) ? $update['robots_follow'] : 'follow';
                 update_post_meta($post_id, '_aiseo_robots_follow', $robots_follow);
+                update_post_meta($post_id, '_aiseo_nofollow', $robots_follow === 'nofollow' ? '1' : '0');
                 $updated_fields[] = 'robots_follow';
             }
             

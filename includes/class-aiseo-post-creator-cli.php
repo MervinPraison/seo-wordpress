@@ -190,17 +190,22 @@ class AISEO_Post_Creator_CLI {
         } else {
             // Parse CSV
             $posts_data = array();
-            $handle = fopen($file, 'r');
-            $headers = fgetcsv($handle);
-            
-            while (($row = fgetcsv($handle)) !== false) {
+            $aiseo_csv_lines = file($file, FILE_IGNORE_NEW_LINES);
+            if ($aiseo_csv_lines === false || $aiseo_csv_lines === array()) {
+                WP_CLI::error('Cannot read CSV file');
+            }
+            $headers = str_getcsv(array_shift($aiseo_csv_lines), ',', '"', '\\');
+            foreach ($aiseo_csv_lines as $aiseo_csv_line) {
+                if (trim($aiseo_csv_line) === '') {
+                    continue;
+                }
+                $row = str_getcsv($aiseo_csv_line, ',', '"', '\\');
                 $post = array();
                 foreach ($headers as $index => $header) {
                     $post[$header] = isset($row[$index]) ? $row[$index] : '';
                 }
                 $posts_data[] = $post;
             }
-            fclose($handle);
         }
         
         if (empty($posts_data)) {

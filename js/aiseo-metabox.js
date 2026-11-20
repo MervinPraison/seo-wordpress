@@ -13,6 +13,15 @@
         if (!$('.aiseo-metabox').length) {
             return;
         }
+
+        $('.aiseo-metabox-tab').on('click', function() {
+            var tab = $(this);
+            var panelId = tab.attr('aria-controls');
+            tab.addClass('is-active').attr('aria-selected', 'true')
+                .siblings('.aiseo-metabox-tab').removeClass('is-active').attr('aria-selected', 'false');
+            $('#' + panelId).removeAttr('hidden').addClass('is-active')
+                .siblings('.aiseo-metabox-panel').attr('hidden', 'hidden').removeClass('is-active');
+        });
         
         // Character counter
         function updateCharCount(input, counter) {
@@ -102,8 +111,8 @@
                 return;
             }
             
-            btn.prop('disabled', true).text('Analyzing...');
-            resultsDiv.hide();
+            btn.prop('disabled', true).text('Analysing...');
+            resultsDiv.attr('hidden', 'hidden');
             
             $.ajax({
                 url: ajaxurl,
@@ -134,14 +143,18 @@
                         
                         $.each(response.data.analyses, function(key, analysis) {
                             var label = labels[key] || key;
-                            var statusClass = analysis.status === 'good' ? 'green' : (analysis.status === 'warning' ? 'orange' : 'red');
-                            html += '<li><strong>' + label + ':</strong> <span style="color:' + statusClass + '">' + analysis.score + '/100</span> - ' + analysis.message + '</li>';
+                            var statusClass = analysis.status === 'good' ? 'good' : (analysis.status === 'ok' ? 'warning' : 'poor');
+                            var score = parseInt(analysis.score, 10);
+                            if (isNaN(score)) {
+                                score = 0;
+                            }
+                            html += '<li class="aiseo-check-' + statusClass + '"><strong>' + $('<div>').text(label).html() + ':</strong> ' + score + '/100 — ' + $('<div>').text(analysis.message || '').html() + '</li>';
                         });
                         html += '</ul>';
-                        html += '<p><strong>Overall Score: ' + response.data.overall_score + '/100</strong></p>';
+                        html += '<p><strong>Overall score: ' + response.data.overall_score + '/100</strong></p>';
                         
                         resultsDiv.find('.aiseo-analysis-content').html(html);
-                        resultsDiv.slideDown();
+                        resultsDiv.removeAttr('hidden');
                     } else {
                         alert('Error: ' + (response.data || 'Failed to analyze'));
                     }
@@ -156,34 +169,218 @@
             });
         });
         
-        // Preview SEO button
+        function refreshSnippet() {
+            var title = $('#aiseo_meta_title').val() || $('.editor-post-title__input').val() || $('input[name="post_title"]').val() || '';
+            var description = $('#aiseo_meta_description').val() || '';
+            var canonical = $('#aiseo_canonical_url').val();
+            var shareTitle = $('#aiseo_og_title').val() || title;
+            var shareDescription = $('#aiseo_og_description').val() || description;
+            $('.aiseo-snippet-title').text(title);
+            $('.aiseo-snippet-description').text(description);
+            $('.aiseo-share-title').text(shareTitle);
+            $('.aiseo-share-description').text(shareDescription);
+            if (canonical) {
+                $('.aiseo-snippet-url').text(canonical.replace(/^https?:\/\//, '').split('?')[0]);
+            }
+        }
+
+        $('#aiseo_meta_title, #aiseo_meta_description, #aiseo_canonical_url, #aiseo_og_title, #aiseo_og_description').on('input', refreshSnippet);
+
+        function htmlToPlainText(html) {
+            if (!html) {
+                return '';
+            }
+            if (window.DOMParser) {
+                var doc = new DOMParser().parseFromString(String(html), 'text/html');
+                return ((doc.body && doc.body.textContent) || '').replace(/\s+/g, ' ').trim();
+            }
+            return String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        }
+
+        function editorPlainText() {
+            if (window.wp && wp.data && wp.data.select('core/editor')) {
+                try {
+                    return htmlToPlainText(wp.data.select('core/editor').getEditedPostContent() || '');
+                } catch (ignore) {
+                    /* Classic editor fallback below. */
+                }
+            }
+            if (window.tinymce && tinymce.get('content')) {
+                return tinymce.get('content').getContent({ format: 'text' }) || '';
+            }
+            return $('#content').val() || '';
+        }
+
+        function fleschEase(text) {
+            if (!text) {
+                return null;
+            }
+            var sentences = text.split(/[.!?]+/).filter(function (part) {
+                return part.trim().length > 0;
+            }).length;
+            var words = text.split(/\s+/).filter(Boolean).length;
+            if (!sentences || !words) {
+                return null;
+            }
+            var syllables = 0;
+            text.toLowerCase().split(/\s+/).forEach(function (word) {
+                var clean = word.replace(/[^a-z]/g, '');
+                if (!clean) {
+                    return;
+                }
+                var groups = clean.match(/[aeiouy]+/g);
+                syllables += groups ? groups.length : 1;
+            });
+            var score = 206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words);
+            return Math.max(0, Math.min(100, Math.round(score * 10) / 10));
+        }
+
+        function liveCheckItem(status, message) {
+            var icon = status === 'good' ? 'yes-alt' : (status === 'poor' ? 'dismiss' : 'warning');
+            return '<li class="aiseo-check-' + status + '"><span class="dashicons dashicons-' + icon + '" aria-hidden="true"></span> ' + $('<div>').text(message).html() + '</li>';
+        }
+
+        function refreshLiveChecks() {
+            var title = $('#aiseo_meta_title').val() || '';
+            var description = $('#aiseo_meta_description').val() || '';
+            var keyword = ($('#aiseo_focus_keyword').val() || '').trim();
+            var extra = ($('#aiseo_additional_keywords').val() || '').split(/[\n,]+/).map(function (item) {
+                return item.trim();
+            }).filter(Boolean).slice(0, 4);
+            var content = editorPlainText();
+            var haystack = (title + ' ' + content).toLowerCase();
+            var items = [];
+            var titleLen = title.length;
+            items.push(liveCheckItem(
+                (titleLen >= 50 && titleLen <= 60) ? 'good' : 'warning',
+                'SEO title length is ' + titleLen + ' characters. Aim for 50 to 60.'
+            ));
+            var descLen = description.length;
+            items.push(liveCheckItem(
+                (descLen >= 120 && descLen <= 160) ? 'good' : 'warning',
+                'Meta description length is ' + descLen + ' characters. Aim for 120 to 160.'
+            ));
+            if (keyword) {
+                items.push(liveCheckItem(
+                    haystack.indexOf(keyword.toLowerCase()) !== -1 ? 'good' : 'poor',
+                    haystack.indexOf(keyword.toLowerCase()) !== -1
+                        ? 'The focus keyword appears in the title or content.'
+                        : 'The focus keyword does not appear in the title or content.'
+                ));
+            }
+            extra.forEach(function (phrase) {
+                if (phrase.toLowerCase() === keyword.toLowerCase()) {
+                    return;
+                }
+                items.push(liveCheckItem(
+                    haystack.indexOf(phrase.toLowerCase()) !== -1 ? 'good' : 'warning',
+                    haystack.indexOf(phrase.toLowerCase()) !== -1
+                        ? 'Extra keyword “' + phrase + '” appears in the content.'
+                        : 'Extra keyword “' + phrase + '” is missing from the content.'
+                ));
+            });
+            var flesch = fleschEase(content);
+            var readItems = [];
+            if (flesch !== null) {
+                var readStatus = (flesch >= 60 && flesch <= 80) || flesch >= 80 ? 'good' : (flesch >= 50 ? 'good' : 'warning');
+                var readMsg = 'Flesch Reading Ease: ' + flesch + '. 60–80 is comfortable to read. This is not a search ranking.';
+                items.push(liveCheckItem(readStatus, readMsg));
+                readItems.push(liveCheckItem(readStatus, readMsg));
+                $('.aiseo-readability-score strong').text('Flesch Reading Ease: ' + flesch);
+            }
+            var score = 50;
+            if (titleLen >= 50 && titleLen <= 60) {
+                score += 15;
+            }
+            if (descLen >= 120 && descLen <= 160) {
+                score += 15;
+            }
+            if (keyword && haystack.indexOf(keyword.toLowerCase()) !== -1) {
+                score += 15;
+            }
+            if (flesch !== null && flesch >= 50) {
+                score += 5;
+            }
+            if (score > 100) {
+                score = 100;
+            }
+            var ringStatus = score >= 80 ? 'good' : (score >= 50 ? 'ok' : 'poor');
+            $('.aiseo-score-ring-number').text(String(score));
+            $('.aiseo-score-stroke')
+                .attr('stroke-dasharray', ((score / 100) * 188) + ' 188')
+                .removeClass('aiseo-score-stroke-good aiseo-score-stroke-ok aiseo-score-stroke-poor')
+                .addClass('aiseo-score-stroke-' + ringStatus);
+            $('.aiseo-score-ring-copy p').text('Status: ' + ringStatus.charAt(0).toUpperCase() + ringStatus.slice(1));
+            $('#aiseo-live-checks').html(items.join(''));
+            if (readItems.length) {
+                $('#aiseo-live-readability').html(readItems.join(''));
+            }
+        }
+
+        var liveTimer;
+        function queueLiveChecks() {
+            clearTimeout(liveTimer);
+            liveTimer = setTimeout(refreshLiveChecks, 300);
+        }
+        $('#aiseo_meta_title, #aiseo_meta_description, #aiseo_focus_keyword, #aiseo_additional_keywords, #title, #content').on('input', queueLiveChecks);
+        $(document).on('tinymce-editor-keyup', queueLiveChecks);
+        if (window.wp && wp.data && typeof wp.data.subscribe === 'function') {
+            var lastEditorContent = '';
+            wp.data.subscribe(function() {
+                try {
+                    var editor = wp.data.select('core/editor');
+                    var next = editor && editor.getEditedPostContent ? (editor.getEditedPostContent() || '') : '';
+                    if (next === lastEditorContent) {
+                        return;
+                    }
+                    lastEditorContent = next;
+                    queueLiveChecks();
+                } catch (ignore) {
+                    /* Block editor store not ready. */
+                }
+            });
+        }
+
+        var ogFrame;
+        $('.aiseo-og-image-select').on('click', function(e) {
+            e.preventDefault();
+            if (typeof wp === 'undefined' || !wp.media) {
+                return;
+            }
+            if (ogFrame) {
+                ogFrame.open();
+                return;
+            }
+            ogFrame = wp.media({
+                title: 'Social image',
+                button: { text: 'Use this image' },
+                library: { type: 'image' },
+                multiple: false
+            });
+            ogFrame.on('select', function() {
+                var attachment = ogFrame.state().get('selection').first().toJSON();
+                var url = (attachment.sizes && attachment.sizes.medium) ? attachment.sizes.medium.url : attachment.url;
+                $('#aiseo_og_image').val(attachment.id);
+                $('.aiseo-og-preview-img, .aiseo-share-image').attr('src', url).show();
+                $('.aiseo-og-image-remove').prop('disabled', false);
+            });
+            ogFrame.open();
+        });
+
+        $('.aiseo-og-image-remove').on('click', function(e) {
+            e.preventDefault();
+            $('#aiseo_og_image').val('0');
+            $('.aiseo-og-preview-img').attr('src', '').hide();
+            $(this).prop('disabled', true);
+        });
         $('.aiseo-preview-btn').on('click', function(e) {
             e.preventDefault();
-            
+            $('#aiseo-tab-seo').trigger('click');
+            refreshSnippet();
             var resultsDiv = $('.aiseo-preview-results');
-            
-            // Get values
-            var title = $('#aiseo_meta_title').val() || $('.editor-post-title__input').val() || $('input[name="post_title"]').val() || 'Your Page Title';
-            var description = $('#aiseo_meta_description').val() || 'Your meta description will appear here. Add a compelling description to improve click-through rates.';
-            var url = $('#aiseo_canonical_url').val() || window.location.href;
-            
-            // Extract domain from URL
-            var domain = url.replace(/^https?:\/\//, '').split('/')[0];
-            
-            // Build preview HTML
-            var previewHtml = '';
-            previewHtml += '<div style="color: #1a0dab; font-size: 20px; font-family: arial, sans-serif; line-height: 1.3; margin-bottom: 5px; cursor: pointer;">' + title + '</div>';
-            previewHtml += '<div style="color: #006621; font-size: 14px; font-family: arial, sans-serif; margin-bottom: 5px;">' + domain + '</div>';
-            previewHtml += '<div style="color: #545454; font-size: 14px; font-family: arial, sans-serif; line-height: 1.5;">' + description + '</div>';
-            
-            // Show preview
-            resultsDiv.find('.aiseo-preview-content').html(previewHtml);
-            resultsDiv.slideDown();
-            
-            // Scroll to preview
-            $('html, body').animate({
-                scrollTop: resultsDiv.offset().top - 100
-            }, 500);
+            if (resultsDiv.length) {
+                $('html, body').animate({ scrollTop: resultsDiv.offset().top - 100 }, 300);
+            }
         });
         
     });

@@ -80,10 +80,10 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/analyze', array(
             'methods' => 'POST',
             'callback' => array($this, 'analyze_content'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_edit_post_permission'),
             'args' => array(
                 'post_id' => array(
-                    'required' => false,
+                    'required' => true,
                     'type' => 'integer',
                     'sanitize_callback' => 'absint',
                 ),
@@ -129,7 +129,7 @@ class AISEO_REST {
                     'required' => false,
                     'type' => 'string',
                     'default' => 'auto',
-                    'enum' => array('auto', 'article', 'blogposting', 'webpage'),
+                    'enum' => array('auto', 'article', 'blogposting', 'webpage', 'newsarticle', 'product', 'howto', 'recipe', 'event', 'course', 'jobposting'),
                 ),
             ),
         ));
@@ -148,7 +148,19 @@ class AISEO_REST {
             ),
         ));
         
-        // Get social media tags for post endpoint
+        register_rest_route(self::NAMESPACE, '/head/(?P<id>\d+)', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_head'),
+            'permission_callback' => array($this, 'check_public_published_post'),
+            'args' => array(
+                'id' => array(
+                    'required' => true,
+                    'type' => 'integer',
+                    'sanitize_callback' => 'absint',
+                ),
+            ),
+        ));
+
         register_rest_route(self::NAMESPACE, '/social-tags/(?P<id>\d+)', array(
             'methods' => 'GET',
             'callback' => array($this, 'get_social_tags'),
@@ -487,7 +499,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/image/missing-alt', array(
             'methods' => 'GET',
             'callback' => array($this, 'get_missing_alt'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_upload_permission'),
             'args' => array(
                 'per_page' => array(
                     'required' => false,
@@ -679,7 +691,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/export/json', array(
             'methods' => 'GET',
             'callback' => array($this, 'export_json'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'post_type' => array(
                     'required' => false,
@@ -693,7 +705,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/export/csv', array(
             'methods' => 'GET',
             'callback' => array($this, 'export_csv'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'post_type' => array(
                     'required' => false,
@@ -707,7 +719,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/import/json', array(
             'methods' => 'POST',
             'callback' => array($this, 'import_json'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'data' => array(
                     'required' => true,
@@ -725,7 +737,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/import/yoast', array(
             'methods' => 'POST',
             'callback' => array($this, 'import_yoast'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'post_type' => array(
                     'required' => false,
@@ -744,7 +756,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/import/rankmath', array(
             'methods' => 'POST',
             'callback' => array($this, 'import_rankmath'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'post_type' => array(
                     'required' => false,
@@ -763,7 +775,25 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/import/aioseo', array(
             'methods' => 'POST',
             'callback' => array($this, 'import_aioseo'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
+            'args' => array(
+                'post_type' => array(
+                    'required' => false,
+                    'type' => 'string',
+                    'default' => 'post',
+                ),
+                'overwrite' => array(
+                    'required' => false,
+                    'type' => 'boolean',
+                    'default' => false,
+                ),
+            ),
+        ));
+
+        register_rest_route(self::NAMESPACE, '/import/seopress', array(
+            'methods' => 'POST',
+            'callback' => array($this, 'import_seopress'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'post_type' => array(
                     'required' => false,
@@ -941,7 +971,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/competitor/add', array(
             'methods' => 'POST',
             'callback' => array($this, 'add_competitor'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'url' => array(
                     'required' => true,
@@ -959,7 +989,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/competitor/remove/(?P<id>[a-zA-Z0-9_-]+)', array(
             'methods' => 'DELETE',
             'callback' => array($this, 'remove_competitor'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'id' => array(
                     'required' => true,
@@ -972,7 +1002,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/competitor/analyze/(?P<id>[a-zA-Z0-9_-]+)', array(
             'methods' => 'POST',
             'callback' => array($this, 'analyze_competitor'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'id' => array(
                     'required' => true,
@@ -1109,7 +1139,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/keyword/clear-cache', array(
             'methods' => 'POST',
             'callback' => array($this, 'clear_keyword_cache'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
         ));
         
         // Backlink Monitoring: List all backlinks
@@ -1909,6 +1939,27 @@ class AISEO_REST {
     }
 
     /**
+     * Media library endpoints.
+     *
+     * @param WP_REST_Request $request Request object.
+     * @return bool|WP_Error
+     */
+    public function check_upload_permission($request) {
+        $base = $this->check_permission($request);
+        if (true !== $base) {
+            return $base;
+        }
+        if (!current_user_can('upload_files')) {
+            return new WP_Error(
+                'rest_forbidden',
+                __('You do not have permission to access this endpoint.', 'aiseo'),
+                array('status' => 403)
+            );
+        }
+        return true;
+    }
+
+    /**
      * Check permission to access or modify a specific post.
      *
      * @param WP_REST_Request $request Request object.
@@ -1937,6 +1988,33 @@ class AISEO_REST {
             );
         }
 
+        return true;
+    }
+
+    /**
+     * Public read of published, indexable posts (Yoast-style head endpoint).
+     *
+     * @param WP_REST_Request $request Request object.
+     * @return bool|WP_Error
+     */
+    public function check_public_published_post($request) {
+        $post_id = absint($request->get_param('id'));
+        $post = $post_id ? get_post($post_id) : null;
+        if (!$post || $post->post_status !== 'publish' || post_password_required($post)) {
+            return new WP_Error(
+                'rest_forbidden',
+                __('This post is not publicly available.', 'aiseo'),
+                array('status' => 404)
+            );
+        }
+        $noindex = get_post_meta($post_id, '_aiseo_noindex', true);
+        if (in_array($noindex, array(true, 1, '1'), true)) {
+            return new WP_Error(
+                'rest_forbidden',
+                __('This post is not publicly available.', 'aiseo'),
+                array('status' => 404)
+            );
+        }
         return true;
     }
 
@@ -2479,6 +2557,27 @@ class AISEO_REST {
             'meta_tags' => $meta_tags,
         ), 200);
     }
+
+    /**
+     * Combined public head payload for a published post.
+     *
+     * @param WP_REST_Request $request Request object.
+     * @return WP_REST_Response
+     */
+    public function get_head($request) {
+        $post_id = absint($request->get_param('id'));
+        $meta_handler = new AISEO_Meta();
+        $social_handler = new AISEO_Social();
+        $schema_generator = new AISEO_Schema();
+        return new WP_REST_Response(array(
+            'success' => true,
+            'post_id' => $post_id,
+            'url' => get_permalink($post_id),
+            'meta_tags' => $meta_handler->get_meta_tags($post_id),
+            'social_tags' => $social_handler->get_social_tags($post_id),
+            'schema' => $schema_generator->generate_schema($post_id, 'auto'),
+        ), 200);
+    }
     
     /**
      * Get schema markup for post
@@ -2548,6 +2647,10 @@ class AISEO_REST {
         
         $image_seo = new AISEO_Image_SEO();
         $images = $image_seo->detect_missing_alt_text(['posts_per_page' => $per_page]);
+        $images = array_values(array_filter($images, function ($image) {
+            $id = is_object($image) ? (int) $image->ID : absint($image['ID'] ?? $image['id'] ?? 0);
+            return $id && current_user_can('edit_post', $id);
+        }));
         
         return new WP_REST_Response([
             'success' => true,
@@ -2826,6 +2929,32 @@ class AISEO_REST {
             ], 400);
         }
         
+        return new WP_REST_Response([
+            'success' => true,
+            'data' => $result
+        ], 200);
+    }
+
+    /**
+     * Import from SEOPress
+     */
+    public function import_seopress($request) {
+        $post_type = $request->get_param('post_type');
+        $overwrite = $request->get_param('overwrite');
+
+        $import_export = new AISEO_Import_Export();
+        $result = $import_export->import_from_seopress([
+            'post_type' => $post_type,
+            'overwrite' => $overwrite
+        ]);
+
+        if (is_wp_error($result)) {
+            return new WP_REST_Response([
+                'success' => false,
+                'error' => $result->get_error_message()
+            ], 400);
+        }
+
         return new WP_REST_Response([
             'success' => true,
             'data' => $result

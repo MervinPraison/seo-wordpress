@@ -49,9 +49,15 @@ class AISEO_Internal_Linking {
     public function clear_all_caches() {
         global $wpdb;
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Clearing transients
-        $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_aiseo_linking_%'");
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Clearing transients
-        $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_timeout_aiseo_linking_%'");
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+            $wpdb->esc_like('_transient_aiseo_linking_') . '%'
+        ));
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Clearing transients
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+            $wpdb->esc_like('_transient_timeout_aiseo_linking_') . '%'
+        ));
     }
     
     /**
@@ -110,7 +116,8 @@ class AISEO_Internal_Linking {
                 'relevance_score' => $related_post->relevance_score ?? 0.8,
                 'anchor_suggestions' => $anchor_suggestions,
                 'context' => $this->extract_context($content, $related_post->post_title),
-                'reason' => $related_post->reason ?? 'Related content'
+                'reason' => $related_post->reason ?? 'Related content',
+                'cornerstone' => get_post_meta($related_post->ID, '_aiseo_cornerstone', true) === '1',
             ];
         }
         
@@ -145,8 +152,18 @@ class AISEO_Internal_Linking {
         // Limit to recent posts for performance on large sites
         $posts_per_page = min(self::MAX_POSTS_TO_ANALYZE, 50);
         
+        $post_types = get_option('aiseo_sitemap_post_types', null);
+        if (!is_array($post_types) || !$post_types) {
+            $post_types = get_post_types(array('public' => true), 'names');
+            unset($post_types['attachment']);
+            $post_types = array_values($post_types);
+        }
+        if (!$post_types) {
+            $post_types = array('post');
+        }
+
         $args = [
-            'post_type' => 'post',
+            'post_type' => $post_types,
             'post_status' => 'publish',
             'posts_per_page' => $posts_per_page,
             // phpcs:ignore WordPressVIPMinimum.Performance.WPQueryParams.PostNotIn_post__not_in -- Necessary to exclude current post
@@ -159,9 +176,31 @@ class AISEO_Internal_Linking {
         ];
         
         $posts = get_posts($args);
+        $cornerstones = get_posts(array(
+            'post_type' => $post_types,
+            'post_status' => 'publish',
+            'posts_per_page' => 10,
+            'post__not_in' => array_merge(array($post_id), $options['exclude_ids']),
+            'meta_query' => array(
+                array(
+                    'key' => '_aiseo_cornerstone',
+                    'value' => '1',
+                ),
+            ),
+            'no_found_rows' => true,
+        ));
+        $by_id = array();
+        foreach (array_merge($cornerstones, $posts) as $candidate) {
+            $by_id[$candidate->ID] = $candidate;
+        }
+        $posts = array_values($by_id);
         
         if (empty($posts)) {
             return [];
+        }
+
+        if (!AISEO_Helpers::get_api_key()) {
+            return $this->fallback_related_posts($post_id, $content, $posts, $options['limit']);
         }
         
         // Use AI to analyze relevance
@@ -196,7 +235,7 @@ class AISEO_Internal_Linking {
         ]);
         
         if (is_wp_error($response)) {
-            return $response;
+            return $this->fallback_related_posts($post_id, $content, $posts, $options['limit']);
         }
         
         // Parse AI response
@@ -215,6 +254,10 @@ class AISEO_Internal_Linking {
                 if ($post) {
                     $post->relevance_score = $item['relevance_score'] ?? 0.7;
                     $post->reason = $item['reason'] ?? 'Related content';
+                    if (get_post_meta($post->ID, '_aiseo_cornerstone', true) === '1') {
+                        $post->relevance_score = min(1, (float) $post->relevance_score + 0.15);
+                        $post->reason = $post->reason . ' (cornerstone)';
+                    }
                     
                     // Filter by minimum relevance
                     if ($post->relevance_score >= $options['min_relevance']) {
@@ -251,9 +294,12 @@ class AISEO_Internal_Linking {
                 }
             }
             
+            if (get_post_meta($post->ID, '_aiseo_cornerstone', true) === '1') {
+                $score += 0.3;
+            }
             if ($score > 0) {
                 $post->relevance_score = min($score, 1.0);
-                $post->reason = 'Keyword match';
+                $post->reason = get_post_meta($post->ID, '_aiseo_cornerstone', true) === '1' ? 'Cornerstone content' : 'Keyword match';
                 $scored_posts[] = $post;
             }
         }
@@ -309,6 +355,12 @@ class AISEO_Internal_Linking {
      * @return array Anchor text suggestions
      */
     private function suggest_anchor_text($content, $related_post) {
+        if (!AISEO_Helpers::get_api_key()) {
+            return array(
+                $related_post->post_title,
+                __('Read more', 'aiseo'),
+            );
+        }
         $api = new AISEO_API();
         
         $prompt = "Suggest 3 natural anchor text variations for linking to this article:\n\n";

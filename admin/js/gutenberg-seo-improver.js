@@ -1,293 +1,201 @@
 /**
- * AISEO Gutenberg SEO Score Improver
- * Adds "Improve SEO Score" button to post sidebar
+ * Block editor panel that improves SEO title, description and block text.
+ *
+ * @package AISEO
  */
+(function (wp, $) {
+    'use strict';
 
-(function (wp) {
-    const { registerPlugin } = wp.plugins;
-    const { PluginDocumentSettingPanel } = wp.editPost;
-    const { Button, Spinner, Notice } = wp.components;
-    const { Fragment, useState, useEffect } = wp.element;
-    const { useSelect, useDispatch } = wp.data;
-    const { __ } = wp.i18n;
+    if (!wp || !wp.plugins || !wp.element || !wp.components || !wp.data || !wp.i18n) {
+        return;
+    }
 
-    /**
-     * SEO Score Improver Panel
-     */
-    const SEOScoreImprover = () => {
-        const [isImproving, setIsImproving] = useState(false);
-        const [seoScore, setSeoScore] = useState(null);
-        const [analysis, setAnalysis] = useState(null);
-        const [message, setMessage] = useState('');
-        const [messageType, setMessageType] = useState('info');
+    var registerPlugin = wp.plugins.registerPlugin;
+    var PluginDocumentSettingPanel = (wp.editor && wp.editor.PluginDocumentSettingPanel) ||
+        (wp.editPost && wp.editPost.PluginDocumentSettingPanel);
+    var el = wp.element.createElement;
+    var Fragment = wp.element.Fragment;
+    var useState = wp.element.useState;
+    var Button = wp.components.Button;
+    var Spinner = wp.components.Spinner;
+    var Notice = wp.components.Notice;
+    var useSelect = wp.data.useSelect;
+    var useDispatch = wp.data.useDispatch;
+    var __ = wp.i18n.__;
 
-        // Get current post data
-        const { postId, postContent, postTitle, blocks } = useSelect((select) => {
-            const editor = select('core/editor');
-            const blockEditor = select('core/block-editor');
+    if (!PluginDocumentSettingPanel || typeof aiseoSEOImprover === 'undefined') {
+        return;
+    }
+
+    function ajaxPost(data) {
+        return new Promise(function (resolve, reject) {
+            $.ajax({
+                url: aiseoSEOImprover.ajaxUrl || window.ajaxurl,
+                type: 'POST',
+                data: data,
+                success: function (response) {
+                    if (response && response.success) {
+                        resolve(response.data);
+                    } else {
+                        reject((response && response.data) || __('Request failed.', 'aiseo'));
+                    }
+                },
+                error: function (xhr, status, error) {
+                    reject(error || status);
+                }
+            });
+        });
+    }
+
+    function SEOScoreImprover() {
+        var improving = useState(false);
+        var isImproving = improving[0];
+        var setIsImproving = improving[1];
+        var scoreState = useState(null);
+        var seoScore = scoreState[0];
+        var setSeoScore = scoreState[1];
+        var messageState = useState('');
+        var message = messageState[0];
+        var setMessage = messageState[1];
+        var typeState = useState('info');
+        var messageType = typeState[0];
+        var setMessageType = typeState[1];
+
+        var post = useSelect(function (select) {
+            var editor = select('core/editor');
+            var blockEditor = select('core/block-editor');
             return {
                 postId: editor.getCurrentPostId(),
-                postContent: editor.getEditedPostContent(),
                 postTitle: editor.getEditedPostAttribute('title'),
                 blocks: blockEditor.getBlocks()
             };
-        });
+        }, []);
+        var editPost = useDispatch('core/editor').editPost;
+        var updateBlockAttributes = useDispatch('core/block-editor').updateBlockAttributes;
 
-        const { editPost } = useDispatch('core/editor');
-        const { updateBlockAttributes, replaceBlocks } = useDispatch('core/block-editor');
-
-        /**
-         * Get SEO Analysis
-         */
-        const getSEOAnalysis = () => {
-            return new Promise((resolve, reject) => {
-                jQuery.ajax({
-                    url: ajaxurl,
-                    type: 'POST',
-                    data: {
-                        action: 'aiseo_analyze_content',
-                        nonce: aiseoSEOImprover.nonce,
-                        post_id: postId
-                    },
-                    success: function (response) {
-                        if (response.success && response.data) {
-                            resolve(response.data);
-                        } else {
-                            reject(response.data || 'Failed to analyze content');
-                        }
-                    },
-                    error: function (xhr, status, error) {
-                        reject('Connection error: ' + error);
-                    }
-                });
+        function getAnalysis() {
+            return ajaxPost({
+                action: 'aiseo_analyze_content',
+                nonce: aiseoSEOImprover.nonce,
+                post_id: post.postId
             });
-        };
+        }
 
-        /**
-         * Improve SEO Score
-         */
-        const improveSEOScore = async () => {
-            setIsImproving(true);
-            setMessage('Analyzing content...');
-            setMessageType('info');
-
-            try {
-                // Step 1: Get SEO Analysis
-                const analysisData = await getSEOAnalysis();
-                setAnalysis(analysisData);
-                setSeoScore(analysisData.overall_score || 0);
-
-                if (analysisData.overall_score >= 80) {
-                    setMessage('SEO score is already good (80+). No improvements needed.');
-                    setMessageType('success');
-                    setIsImproving(false);
-                    return;
+        function improveMeta(analysisData) {
+            return ajaxPost({
+                action: 'aiseo_improve_seo_meta',
+                nonce: aiseoSEOImprover.nonce,
+                post_id: post.postId,
+                current_title: post.postTitle,
+                analysis: JSON.stringify(analysisData)
+            }).then(function (data) {
+                if (data && data.title) {
+                    editPost({ title: data.title });
                 }
+                return data;
+            });
+        }
 
-                // Step 2: Improve SEO Title & Description
-                setMessage('Improving SEO title and description...');
-                await improveTitleAndDescription(analysisData);
+        function shouldImproveBlock(block) {
+            var allowed = ['core/paragraph', 'core/heading', 'core/list', 'core/quote'];
+            return allowed.indexOf(block.name) !== -1 && (block.attributes.content || block.attributes.values);
+        }
 
-                // Step 3: Improve Content
-                setMessage('Improving content based on SEO analysis...');
-                await improveContent(analysisData);
-
-                // Step 4: Re-analyze to show new score
-                setMessage('Re-analyzing content...');
-                const newAnalysis = await getSEOAnalysis();
-                setSeoScore(newAnalysis.overall_score || 0);
-
-                setMessage(`SEO Score improved from ${analysisData.overall_score}/100 to ${newAnalysis.overall_score}/100!`);
-                setMessageType('success');
-
-            } catch (error) {
-                console.error('SEO Improvement Error:', error);
-                setMessage('Error: ' + error);
-                setMessageType('error');
-            } finally {
-                setIsImproving(false);
+        function improveBlock(block, analysisData) {
+            var html = block.attributes.content || '';
+            var text = '';
+            if (window.DOMParser) {
+                var parsed = new DOMParser().parseFromString(String(html), 'text/html');
+                text = ((parsed.body && parsed.body.textContent) || '').trim();
+            } else {
+                text = String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
             }
-        };
-
-        /**
-         * Improve Title and Description
-         */
-        const improveTitleAndDescription = (analysisData) => {
-            return new Promise((resolve, reject) => {
-                jQuery.ajax({
-                    url: ajaxurl,
-                    type: 'POST',
-                    data: {
-                        action: 'aiseo_improve_seo_meta',
-                        nonce: aiseoSEOImprover.nonce,
-                        post_id: postId,
-                        current_title: postTitle,
-                        analysis: JSON.stringify(analysisData)
-                    },
-                    success: function (response) {
-                        if (response.success && response.data) {
-                            // Update title in editor
-                            if (response.data.title) {
-                                editPost({ title: response.data.title });
-                            }
-                            resolve(response.data);
-                        } else {
-                            reject(response.data || 'Failed to improve meta');
-                        }
-                    },
-                    error: function (xhr, status, error) {
-                        reject('Connection error: ' + error);
-                    }
-                });
+            if (!text) {
+                return Promise.resolve();
+            }
+            return ajaxPost({
+                action: 'aiseo_improve_content_block',
+                nonce: aiseoSEOImprover.nonce,
+                content: text,
+                block_type: block.name,
+                analysis: JSON.stringify(analysisData),
+                preserve_structure: true,
+                minimal_changes: true
+            }).then(function (data) {
+                if (data) {
+                    updateBlockAttributes(block.clientId, { content: data });
+                }
+            }).catch(function () {
+                return null;
             });
-        };
+        }
 
-        /**
-         * Improve Content (Block by Block)
-         */
-        const improveContent = (analysisData) => {
-            return new Promise(async (resolve, reject) => {
-                try {
-                    let improvedCount = 0;
-
-                    // Process each block
-                    for (const block of blocks) {
+        function improveScore() {
+            setIsImproving(true);
+            setMessage(__('Analysing content…', 'aiseo'));
+            setMessageType('info');
+            getAnalysis().then(function (analysisData) {
+                var score = (analysisData && analysisData.overall_score) ? analysisData.overall_score : 0;
+                setSeoScore(score);
+                if (score >= 80) {
+                    setMessage(__('SEO score is already 80 or above. No changes made.', 'aiseo'));
+                    setMessageType('success');
+                    return null;
+                }
+                setMessage(__('Improving SEO title and description…', 'aiseo'));
+                return improveMeta(analysisData).then(function () {
+                    var chain = Promise.resolve();
+                    post.blocks.forEach(function (block) {
                         if (shouldImproveBlock(block)) {
-                            await improveBlock(block, analysisData);
-                            improvedCount++;
-                        }
-                    }
-
-                    resolve({ improved: improvedCount });
-                } catch (error) {
-                    reject(error);
-                }
-            });
-        };
-
-        /**
-         * Check if block should be improved
-         */
-        const shouldImproveBlock = (block) => {
-            const improvableBlocks = [
-                'core/paragraph',
-                'core/heading',
-                'core/list',
-                'core/quote'
-            ];
-            return improvableBlocks.includes(block.name) && 
-                   (block.attributes.content || block.attributes.values);
-        };
-
-        /**
-         * Improve individual block
-         */
-        const improveBlock = (block, analysisData) => {
-            return new Promise((resolve, reject) => {
-                const content = block.attributes.content || '';
-                
-                // Strip HTML to get text
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = content;
-                const textContent = tempDiv.textContent || tempDiv.innerText || '';
-
-                if (!textContent.trim()) {
-                    resolve();
-                    return;
-                }
-
-                jQuery.ajax({
-                    url: ajaxurl,
-                    type: 'POST',
-                    data: {
-                        action: 'aiseo_improve_content_block',
-                        nonce: aiseoSEOImprover.nonce,
-                        content: textContent,
-                        block_type: block.name,
-                        analysis: JSON.stringify(analysisData),
-                        preserve_structure: true,
-                        minimal_changes: true
-                    },
-                    success: function (response) {
-                        if (response.success && response.data) {
-                            // Update block content
-                            updateBlockAttributes(block.clientId, {
-                                content: response.data
+                            chain = chain.then(function () {
+                                return improveBlock(block, analysisData);
                             });
                         }
-                        resolve();
-                    },
-                    error: function () {
-                        // Don't fail entire process if one block fails
-                        resolve();
-                    }
+                    });
+                    return chain.then(function () {
+                        return getAnalysis();
+                    }).then(function (next) {
+                        var nextScore = (next && next.overall_score) ? next.overall_score : 0;
+                        setSeoScore(nextScore);
+                        setMessage(
+                            __('SEO score went from ', 'aiseo') + score + '/100 ' + __('to', 'aiseo') + ' ' + nextScore + '/100.'
+                        );
+                        setMessageType('success');
+                    });
                 });
+            }).catch(function (error) {
+                setMessage(String(error));
+                setMessageType('error');
+            }).then(function () {
+                setIsImproving(false);
             });
-        };
+        }
 
-        return (
-            <PluginDocumentSettingPanel
-                name="aiseo-seo-improver"
-                title={__('SEO Score Improver', 'aiseo')}
-                icon="chart-line"
-            >
-                <div style={{ padding: '10px 0' }}>
-                    {seoScore !== null && (
-                        <div style={{ 
-                            marginBottom: '15px', 
-                            padding: '10px', 
-                            background: seoScore >= 80 ? '#d4edda' : seoScore >= 50 ? '#fff3cd' : '#f8d7da',
-                            borderRadius: '4px',
-                            textAlign: 'center'
-                        }}>
-                            <strong>Current SEO Score: {seoScore}/100</strong>
-                        </div>
-                    )}
+        var children = [
+            seoScore !== null ? el('p', { key: 'score' },
+                el('strong', null, __('Current SEO score:', 'aiseo') + ' ' + seoScore + '/100')
+            ) : null,
+            message ? el(Notice, { key: 'notice', status: messageType, isDismissible: false }, message) : null,
+            el(Button, {
+                key: 'button',
+                isPrimary: true,
+                disabled: isImproving,
+                onClick: improveScore
+            }, isImproving ? el(Fragment, null, el(Spinner, null), ' ', __('Improving…', 'aiseo')) : __('Improve SEO score', 'aiseo')),
+            el('p', { key: 'help', className: 'aiseo-muted' },
+                __('Uses your API key to adjust the title, description and text blocks. Review the result before publishing.', 'aiseo')
+            )
+        ];
 
-                    {message && (
-                        <Notice
-                            status={messageType}
-                            isDismissible={false}
-                            style={{ marginBottom: '10px' }}
-                        >
-                            {message}
-                        </Notice>
-                    )}
+        return el(PluginDocumentSettingPanel, {
+            name: 'aiseo-seo-improver',
+            title: __('AISEO score', 'aiseo'),
+            icon: 'chart-line'
+        }, children);
+    }
 
-                    <Button
-                        isPrimary
-                        isLarge
-                        disabled={isImproving}
-                        onClick={improveSEOScore}
-                        style={{ width: '100%' }}
-                    >
-                        {isImproving ? (
-                            <Fragment>
-                                <Spinner />
-                                {__('Improving...', 'aiseo')}
-                            </Fragment>
-                        ) : (
-                            __('Improve SEO Score', 'aiseo')
-                        )}
-                    </Button>
-
-                    <p style={{ 
-                        fontSize: '12px', 
-                        color: '#666', 
-                        marginTop: '10px',
-                        lineHeight: '1.4'
-                    }}>
-                        This will automatically improve your SEO title, description, and content based on SEO analysis while preserving the structure.
-                    </p>
-                </div>
-            </PluginDocumentSettingPanel>
-        );
-    };
-
-    // Register the plugin
     registerPlugin('aiseo-seo-improver', {
         render: SEOScoreImprover,
         icon: 'chart-line'
     });
-
-})(window.wp);
+})(window.wp, window.jQuery);

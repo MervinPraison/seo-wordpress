@@ -28,6 +28,7 @@ class AISEO_Social {
      */
     public function inject_social_tags() {
         if (!is_singular()) {
+            $this->output_archive_social_tags();
             return;
         }
         
@@ -42,6 +43,121 @@ class AISEO_Social {
         
         // Output Twitter Card tags
         $this->output_twitter_card_tags($post);
+    }
+
+    /**
+     * Share tags for category, tag, and author archives.
+     */
+    private function output_archive_social_tags() {
+        if ((is_front_page() && !is_singular()) || (is_home() && !is_front_page())) {
+            $title = wp_get_document_title();
+            if (is_front_page()) {
+                $description = get_option('aiseo_home_description', '');
+                $url = home_url('/');
+            } else {
+                $description = get_option('aiseo_blog_description', '');
+                $posts_page = (int) get_option('page_for_posts');
+                $url = $posts_page ? get_permalink($posts_page) : '';
+            }
+            if (!is_string($description) || trim(wp_strip_all_tags($description)) === '') {
+                $description = get_bloginfo('description');
+            }
+            $paged = max(1, (int) get_query_var('paged'), (int) get_query_var('page'));
+            if ($paged > 1) {
+                $url = get_pagenum_link($paged);
+            }
+            $this->output_website_social_tags($title, $description, $url);
+            return;
+        }
+
+        if (!is_category() && !is_tag() && !is_tax() && !is_author() && !is_post_type_archive()) {
+            return;
+        }
+
+        $title = wp_get_document_title();
+        $description = '';
+        $url = '';
+
+        if (is_post_type_archive()) {
+            $post_type = get_queried_object();
+            if ($post_type instanceof WP_Post_Type) {
+                $description = $post_type->description;
+                $archive = get_post_type_archive_link($post_type->name);
+                $url = is_string($archive) ? $archive : '';
+            }
+        } elseif (is_author()) {
+            $user = get_queried_object();
+            if ($user instanceof WP_User) {
+                $description = get_user_meta($user->ID, 'description', true);
+                $url = get_author_posts_url($user->ID);
+            }
+        } else {
+            $term = get_queried_object();
+            if ($term instanceof WP_Term) {
+                $meta = array();
+                if (class_exists('AISEO_Taxonomy_SEO')) {
+                    $meta = (new AISEO_Taxonomy_SEO())->get_term_meta($term->term_id, $term->taxonomy);
+                }
+                $description = !empty($meta['description']) ? $meta['description'] : $term->description;
+                $term_link = get_term_link($term);
+                $url = is_wp_error($term_link) ? '' : $term_link;
+            }
+        }
+
+        $paged = max(1, (int) get_query_var('paged'), (int) get_query_var('page'));
+        if ($paged > 1 && $url !== '') {
+            $url = get_pagenum_link($paged);
+        }
+        $this->output_website_social_tags($title, $description, $url);
+    }
+
+    /**
+     * Open Graph and Twitter tags for a website-type URL.
+     *
+     * @param string $title       Share title.
+     * @param string $description Share description.
+     * @param string $url         Canonical URL.
+     */
+    private function output_website_social_tags($title, $description, $url) {
+        $description = is_string($description) ? AISEO_Helpers::truncate_text(wp_strip_all_tags($description), 160) : '';
+        $url = esc_url($url);
+        if ($title === '' || $url === '') {
+            return;
+        }
+
+        echo "\n<!-- Archive social tags -->\n";
+        echo '<meta property="og:type" content="website">' . "\n";
+        echo '<meta property="og:title" content="' . esc_attr($title) . '">' . "\n";
+        if ($description !== '') {
+            echo '<meta property="og:description" content="' . esc_attr($description) . '">' . "\n";
+        }
+        echo '<meta property="og:url" content="' . esc_url($url) . '">' . "\n";
+        echo '<meta property="og:site_name" content="' . esc_attr(get_bloginfo('name')) . '">' . "\n";
+        $image = $this->get_site_logo_image();
+        if ($image) {
+            echo '<meta property="og:image" content="' . esc_url($image['url']) . '">' . "\n";
+            if (!empty($image['width'])) {
+                echo '<meta property="og:image:width" content="' . esc_attr($image['width']) . '">' . "\n";
+            }
+            if (!empty($image['height'])) {
+                echo '<meta property="og:image:height" content="' . esc_attr($image['height']) . '">' . "\n";
+            }
+            if (!empty($image['alt'])) {
+                echo '<meta property="og:image:alt" content="' . esc_attr($image['alt']) . '">' . "\n";
+            }
+        }
+        echo '<meta name="twitter:card" content="' . esc_attr($image ? 'summary_large_image' : 'summary') . '">' . "\n";
+        $twitter_site = get_option('aiseo_twitter_site');
+        if (is_string($twitter_site) && preg_match('/^@[A-Za-z0-9_]{1,15}$/', $twitter_site)) {
+            echo '<meta name="twitter:site" content="' . esc_attr($twitter_site) . '">' . "\n";
+        }
+        echo '<meta name="twitter:title" content="' . esc_attr($title) . '">' . "\n";
+        if ($image) {
+            echo '<meta name="twitter:image" content="' . esc_url($image['url']) . '">' . "\n";
+        }
+        if ($description !== '') {
+            echo '<meta name="twitter:description" content="' . esc_attr($description) . '">' . "\n";
+        }
     }
     
     /**
@@ -66,8 +182,7 @@ class AISEO_Social {
             echo '<meta property="og:description" content="' . esc_attr($og_description) . '">' . "\n";
         }
         
-        // og:url
-        $og_url = get_permalink($post->ID);
+        $og_url = class_exists('AISEO_Meta') ? AISEO_Meta::canonical_url($post) : get_permalink($post->ID);
         echo '<meta property="og:url" content="' . esc_url($og_url) . '">' . "\n";
         
         // og:site_name
@@ -111,10 +226,9 @@ class AISEO_Social {
                 echo '<meta property="article:author" content="' . esc_attr($author->display_name) . '">' . "\n";
             }
             
-            // article:section (category)
-            $categories = get_the_category($post->ID);
-            if (!empty($categories)) {
-                echo '<meta property="article:section" content="' . esc_attr($categories[0]->name) . '">' . "\n";
+            $category = class_exists('AISEO_Breadcrumbs') ? AISEO_Breadcrumbs::primary_category($post->ID) : null;
+            if ($category) {
+                echo '<meta property="article:section" content="' . esc_attr($category->name) . '">' . "\n";
             }
             
             // article:tag (tags)
@@ -122,6 +236,26 @@ class AISEO_Social {
             if ($tags) {
                 foreach (array_slice($tags, 0, 5) as $tag) {
                     echo '<meta property="article:tag" content="' . esc_attr($tag->name) . '">' . "\n";
+                }
+            }
+        }
+
+        if ($og_type === 'product' && function_exists('wc_get_product')) {
+            $product = wc_get_product($post->ID);
+            if ($product) {
+                $price = $product->get_price();
+                if ($price !== '' && $price !== null && is_numeric($price)) {
+                    echo '<meta property="product:price:amount" content="' . esc_attr((string) $price) . '">' . "\n";
+                }
+                $currency = function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : '';
+                if (is_string($currency) && $currency !== '') {
+                    echo '<meta property="product:price:currency" content="' . esc_attr($currency) . '">' . "\n";
+                }
+                $availability = $product->is_in_stock() ? 'instock' : 'oos';
+                echo '<meta property="product:availability" content="' . esc_attr($availability) . '">' . "\n";
+                $sku = $product->get_sku();
+                if (is_string($sku) && $sku !== '') {
+                    echo '<meta property="product:retailer_item_id" content="' . esc_attr($sku) . '">' . "\n";
                 }
             }
         }
@@ -195,6 +329,10 @@ class AISEO_Social {
         if ($post->post_type === 'page') {
             return 'website';
         }
+
+        if ($post->post_type === 'product') {
+            return 'product';
+        }
         
         return 'article';
     }
@@ -219,8 +357,14 @@ class AISEO_Social {
         if (!empty($seo_title)) {
             return $seo_title;
         }
+
+        if (class_exists('AISEO_Title_Templates')) {
+            $formatted = (new AISEO_Title_Templates())->format_post_title($post);
+            if ($formatted !== '') {
+                return $formatted;
+            }
+        }
         
-        // Fallback to post title
         return $post->post_title;
     }
     
@@ -243,6 +387,13 @@ class AISEO_Social {
         
         if (!empty($seo_description)) {
             return $seo_description;
+        }
+
+        if (class_exists('AISEO_Title_Templates')) {
+            $formatted = (new AISEO_Title_Templates())->format_post_description($post);
+            if ($formatted !== '') {
+                return $formatted;
+            }
         }
         
         // Fallback to excerpt or content
@@ -287,8 +438,24 @@ class AISEO_Social {
         if ($default_image_id) {
             return $this->get_image_data($default_image_id);
         }
-        
-        return false;
+
+        return $this->get_site_logo_image();
+    }
+
+    /**
+     * Site logo, or the default social image, for pages without their own image.
+     *
+     * @return array|false
+     */
+    private function get_site_logo_image() {
+        $logo_id = (int) get_theme_mod('custom_logo');
+        if (!$logo_id) {
+            $logo_id = (int) get_option('aiseo_default_og_image');
+        }
+        if (!$logo_id) {
+            return false;
+        }
+        return $this->get_image_data($logo_id);
     }
     
     /**
@@ -303,6 +470,11 @@ class AISEO_Social {
         
         if (!empty($custom_type)) {
             return $custom_type;
+        }
+
+        $site_default = get_option('aiseo_twitter_card_default', '');
+        if (in_array($site_default, array('summary', 'summary_large_image'), true)) {
+            return $site_default;
         }
         
         // Default to summary_large_image if there's a featured image
