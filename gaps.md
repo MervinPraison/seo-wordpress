@@ -44,9 +44,19 @@ Internal checklist for later verification. Do not invent search ranks, volumes, 
 - Main menu is visible to `edit_posts`; settings are capability-gated but authors still see the plugin.
 - Settings is still one form; the side nav only jumps to sections.
 
+## WordPress AI (as of November 2026)
+
+Core and canonical plugins, not our own OpenAI client:
+
+- Gutenberg SEO sidebar still uses custom AJAX on 7.0+, not `@wordpress/abilities` `runAbility()`.
+- Official AI plugin Meta Description: PHP filter is registered; Gutenberg `ai.metaDescription.seoAdapters` JS adapter not added (REST meta already `show_in_rest`).
+- WP AI Client is used for text generation when Connectors work; vision/alt still uses the OpenAI path.
+- WordPress 7.2 (RC in November 2026, due 8 December) adds `required_capabilities` and `prepare_input()`. Keep `permission_callback` until 7.2 is the floor.
+- Official AI plugin also has alt text, slug suggestions, editorial SEO notes, and markdown feeds. We already cover alt, permalinks, and llms.txt ourselves; only share keys/connectors, do not duplicate those UIs.
+
 ## AI assistants
 
-- MCP abilities are registered on WordPress 6.9+ but have not been proven end-to-end with the official MCP Adapter and a live assistant.
+- MCP abilities are registered for WordPress 6.9+ with output schemas, `meta.public`, `meta.show_in_rest`, and `meta.mcp.public`. Verified on the local HTTPS site against official MCP Adapter 0.7.2: HTTP `initialize`, `tools/call` discover, and `tools/call` execute for site SEO, post SEO, and list posts. A named desktop assistant (Claude Desktop / Cursor MCP config) has not been click-tested.
 
 ## Internationalisation
 
@@ -63,3 +73,5 @@ These were identified and deferred rather than shipped in this cycle:
 - Live Search Console OAuth against a real Google client.
 - Rank tracking with a real provider.
 - Gutenberg browser verification on Valet HTTPS.
+- Desktop MCP client config (Claude Desktop / Cursor) against the local Valet HTTPS endpoint.
+- Gutenberg `runAbility()` instead of custom AJAX on WordPress 7.0+.

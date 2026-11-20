@@ -200,7 +200,7 @@ $features = array(
     array(
         'label' => __('MCP abilities', 'aiseo'),
         'on' => class_exists('AISEO_Abilities') && AISEO_Abilities::is_supported(),
-        'url' => admin_url('admin.php?page=aiseo&tab=settings'),
+        'url' => (class_exists('AISEO_Abilities') && AISEO_Abilities::adapter_is_active()) ? AISEO_Abilities::adapter_endpoint() : admin_url('admin.php?page=aiseo&tab=settings'),
     ),
 );
 if (class_exists('WooCommerce')) {

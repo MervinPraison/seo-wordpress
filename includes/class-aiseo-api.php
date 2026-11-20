@@ -244,10 +244,17 @@ class AISEO_API {
      * @return string|WP_Error Response text or error
      */
     public function make_request($prompt, $options = array()) {
+        if (class_exists('AISEO_WP_AI') && AISEO_WP_AI::is_ready()) {
+            $core = AISEO_WP_AI::generate_text($prompt, $options);
+            if (!is_wp_error($core) || $core->get_error_code() !== 'aiseo_no_core_ai') {
+                return $core;
+            }
+        }
+
         // Check API key
         if (empty($this->api_key)) {
             AISEO_Helpers::log('ERROR', 'api_request', 'API key not configured');
-            return new WP_Error('no_api_key', __('OpenAI API key not configured', 'aiseo'));
+            return new WP_Error('no_api_key', __('No WordPress AI connector is configured, and no OpenAI API key is saved.', 'aiseo'));
         }
         
         // Check rate limiting

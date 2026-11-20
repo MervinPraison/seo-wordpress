@@ -3,7 +3,7 @@ Contributors: MervinPraison
 Tags: seo, ai, openai, schema, sitemap
 Requires at least: 5.0
 Tested up to: 7.1
-Stable tag: 5.0.12
+Stable tag: 5.0.13
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -164,6 +164,12 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 
 == Changelog ==
 
+= 5.0.13 =
+* Use the WordPress 7.0 AI Client and Connectors for title and description generation when available
+* Register with the official WordPress AI plugin so generated meta descriptions save into this plugin
+* MCP: generate-post-seo ability, plus sitemap and llms.txt resources
+* Abilities now include output schemas and MCP Adapter 0.7 public flags
+
 = 5.0.12 =
 * Gutenberg SEO sidebar, FAQ and breadcrumbs blocks, extra keywords, and readability checks
 * News, video, and image sitemaps; llms.txt; IndexNow; HTML sitemap; optional out-of-stock product noindex
@@ -287,7 +293,15 @@ This service is provided by OpenAI:
 * Terms of use: https://openai.com/policies/row-terms-of-use/
 * Privacy policy: https://openai.com/policies/row-privacy-policy/
 
-You must supply your own OpenAI API key to use these features.
+You must supply your own OpenAI API key to use these features, unless WordPress 7.0 or later has a working AI connector in Settings → Connectors.
+
+= WordPress AI Client and Connectors (optional) =
+
+On WordPress 7.0 or later, title and description generation uses the core AI Client when a connector is configured (OpenAI, Google, Anthropic, or another connector you add). The plugin then sends the same generation prompts through WordPress instead of calling OpenAI directly. No extra data is sent until you trigger a generation feature.
+
+This uses WordPress core and the provider you configured under Settings → Connectors:
+* Terms of service: https://wordpress.org/about/privacy/
+* Provider terms depend on the connector you enable (for example OpenAI, Google, or Anthropic).
 
 = Google Analytics (optional) =
 

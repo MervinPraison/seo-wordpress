@@ -46,6 +46,7 @@ class AISEO_Core {
     private $roles;
     private $setup;
     private $abilities;
+    private $wp_ai;
     private $blocks;
     
     /**
@@ -150,6 +151,9 @@ class AISEO_Core {
 
         $this->abilities = new AISEO_Abilities();
         $this->abilities->init();
+
+        $this->wp_ai = new AISEO_WP_AI();
+        $this->wp_ai->init();
 
         $this->blocks = new AISEO_Blocks();
         $this->blocks->init();

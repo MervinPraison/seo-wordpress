@@ -1,9 +1,11 @@
 <?php
 /**
- * WordPress Abilities API tools for MCP Adapter clients.
+ * WordPress Abilities API tools for the official MCP Adapter.
  *
- * Rank Math, AIOSEO and SEOPress expose SEO actions to assistants in 2026.
- * These abilities stay honest: real site data only, no invented ranks.
+ * Registration follows WordPress 6.9 plus MCP Adapter 0.7:
+ * category on wp_abilities_api_categories_init, abilities on wp_abilities_api_init,
+ * typed input/output schemas, meta.public + meta.show_in_rest (6.9 REST),
+ * and meta.mcp.public for the default MCP server.
  *
  * @package AISEO
  */
@@ -33,6 +35,42 @@ class AISEO_Abilities {
     }
 
     /**
+     * Official WordPress MCP Adapter plugin (mcp-adapter).
+     *
+     * @return bool
+     */
+    public static function adapter_is_active() {
+        if (class_exists('WP\MCP\Core\McpAdapter') || class_exists('WP\MCP\Plugin')) {
+            return true;
+        }
+        if (defined('MCP_ADAPTER_VERSION')) {
+            return true;
+        }
+        if (!function_exists('is_plugin_active')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+        return is_plugin_active('mcp-adapter/mcp-adapter.php');
+    }
+
+    /**
+     * Default MCP HTTP endpoint when the official adapter is active.
+     *
+     * @return string
+     */
+    public static function adapter_endpoint() {
+        return rest_url('mcp/mcp-adapter-default-server');
+    }
+
+    /**
+     * Abilities REST list URL (WordPress 6.9).
+     *
+     * @return string
+     */
+    public static function rest_list_url() {
+        return rest_url('wp-abilities/v1/abilities?category=aiseo');
+    }
+
+    /**
      * Ability category used by every aiseo/* tool.
      */
     public function register_category() {
@@ -59,9 +97,10 @@ class AISEO_Abilities {
                 'readonly' => true,
                 'input_schema' => array(
                     'type' => 'object',
-                    'properties' => new stdClass(),
                     'additionalProperties' => false,
+                    'default' => array(),
                 ),
+                'output_schema' => $this->site_seo_output_schema(),
             )
         );
         $this->register_one(
@@ -82,6 +121,49 @@ class AISEO_Abilities {
                     ),
                     'required' => array('post_id'),
                     'additionalProperties' => false,
+                ),
+                'output_schema' => $this->post_seo_output_schema(),
+            )
+        );
+        $this->register_one(
+            'aiseo/list-posts-seo',
+            array(
+                'label' => __('List post SEO fields', 'aiseo'),
+                'description' => __('Returns SEO title, description, keyword and noindex for recent posts of one type. Does not invent search rankings.', 'aiseo'),
+                'execute_callback' => array($this, 'list_posts_seo'),
+                'permission_callback' => array($this, 'can_read'),
+                'readonly' => true,
+                'input_schema' => array(
+                    'type' => 'object',
+                    'properties' => array(
+                        'post_type' => array(
+                            'type' => 'string',
+                            'description' => __('Post type slug. Default post.', 'aiseo'),
+                            'default' => 'post',
+                        ),
+                        'limit' => array(
+                            'type' => 'integer',
+                            'description' => __('How many posts to return, 1–20. Default 10.', 'aiseo'),
+                            'minimum' => 1,
+                            'maximum' => 20,
+                            'default' => 10,
+                        ),
+                    ),
+                    'additionalProperties' => false,
+                ),
+                'output_schema' => array(
+                    'type' => 'object',
+                    'required' => array('post_type', 'posts'),
+                    'additionalProperties' => false,
+                    'properties' => array(
+                        'post_type' => array(
+                            'type' => 'string',
+                        ),
+                        'posts' => array(
+                            'type' => 'array',
+                            'items' => $this->post_seo_output_schema(),
+                        ),
+                    ),
                 ),
             )
         );
@@ -120,6 +202,102 @@ class AISEO_Abilities {
                     'required' => array('post_id'),
                     'additionalProperties' => false,
                 ),
+                'output_schema' => $this->post_seo_output_schema(),
+            )
+        );
+        $this->register_one(
+            'aiseo/generate-post-seo',
+            array(
+                'label' => __('Generate post SEO fields', 'aiseo'),
+                'description' => __('Suggests an SEO title and/or meta description from the post content. Does not save unless you then call update-post-seo. Does not invent search rankings.', 'aiseo'),
+                'execute_callback' => array($this, 'generate_post_seo'),
+                'permission_callback' => array($this, 'can_edit_given_post'),
+                'readonly' => false,
+                'input_schema' => array(
+                    'type' => 'object',
+                    'properties' => array(
+                        'post_id' => array(
+                            'type' => 'integer',
+                            'description' => __('Post ID.', 'aiseo'),
+                        ),
+                        'fields' => array(
+                            'type' => 'array',
+                            'description' => __('Which fields to generate. Default title and description.', 'aiseo'),
+                            'items' => array(
+                                'type' => 'string',
+                                'enum' => array('title', 'description'),
+                            ),
+                            'default' => array('title', 'description'),
+                        ),
+                    ),
+                    'required' => array('post_id'),
+                    'additionalProperties' => false,
+                ),
+                'output_schema' => array(
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'properties' => array(
+                        'post_id' => array(
+                            'type' => 'integer',
+                        ),
+                        'title' => array(
+                            'type' => 'string',
+                        ),
+                        'description' => array(
+                            'type' => 'string',
+                        ),
+                    ),
+                ),
+            )
+        );
+        $this->register_one(
+            'aiseo/sitemap',
+            array(
+                'label' => __('XML sitemap URL', 'aiseo'),
+                'description' => __('The public XML sitemap index URL when sitemaps are enabled.', 'aiseo'),
+                'execute_callback' => array($this, 'get_sitemap_resource'),
+                'permission_callback' => array($this, 'can_read'),
+                'readonly' => true,
+                'mcp_type' => 'resource',
+                'uri' => home_url('/sitemap_index.xml'),
+                'output_schema' => array(
+                    'type' => 'object',
+                    'required' => array('url', 'enabled'),
+                    'additionalProperties' => false,
+                    'properties' => array(
+                        'url' => array(
+                            'type' => 'string',
+                        ),
+                        'enabled' => array(
+                            'type' => 'boolean',
+                        ),
+                    ),
+                ),
+            )
+        );
+        $this->register_one(
+            'aiseo/llms-txt',
+            array(
+                'label' => __('llms.txt URL', 'aiseo'),
+                'description' => __('The public llms.txt URL for AI assistants when that file is enabled.', 'aiseo'),
+                'execute_callback' => array($this, 'get_llms_resource'),
+                'permission_callback' => array($this, 'can_read'),
+                'readonly' => true,
+                'mcp_type' => 'resource',
+                'uri' => home_url('/llms.txt'),
+                'output_schema' => array(
+                    'type' => 'object',
+                    'required' => array('url', 'enabled'),
+                    'additionalProperties' => false,
+                    'properties' => array(
+                        'url' => array(
+                            'type' => 'string',
+                        ),
+                        'enabled' => array(
+                            'type' => 'boolean',
+                        ),
+                    ),
+                ),
             )
         );
         $this->register_one(
@@ -141,6 +319,22 @@ class AISEO_Abilities {
                     'required' => array('url'),
                     'additionalProperties' => false,
                 ),
+                'output_schema' => array(
+                    'type' => 'object',
+                    'required' => array('url', 'http_status', 'submitted'),
+                    'additionalProperties' => false,
+                    'properties' => array(
+                        'url' => array(
+                            'type' => 'string',
+                        ),
+                        'http_status' => array(
+                            'type' => 'integer',
+                        ),
+                        'submitted' => array(
+                            'type' => 'boolean',
+                        ),
+                    ),
+                ),
             )
         );
     }
@@ -151,14 +345,19 @@ class AISEO_Abilities {
      */
     private function register_one($name, $args) {
         $readonly = !empty($args['readonly']);
-        unset($args['readonly']);
+        $mcp_type = isset($args['mcp_type']) ? (string) $args['mcp_type'] : 'tool';
+        $uri = isset($args['uri']) ? (string) $args['uri'] : '';
+        unset($args['readonly'], $args['mcp_type'], $args['uri']);
+        if (!in_array($mcp_type, array('tool', 'resource', 'prompt'), true)) {
+            $mcp_type = 'tool';
+        }
         $args['category'] = 'aiseo';
         $args['meta'] = array(
             'public' => true,
             'show_in_rest' => true,
             'mcp' => array(
                 'public' => true,
-                'type' => 'tool',
+                'type' => $mcp_type,
             ),
             'annotations' => array(
                 'readonly' => $readonly,
@@ -166,7 +365,81 @@ class AISEO_Abilities {
                 'idempotent' => $readonly,
             ),
         );
+        if ($uri !== '') {
+            $args['meta']['uri'] = $uri;
+        }
         wp_register_ability($name, $args);
+    }
+
+    /**
+     * @return array
+     */
+    private function post_seo_output_schema() {
+        return array(
+            'type' => 'object',
+            'required' => array('post_id', 'title', 'description', 'keyword', 'canonical', 'noindex', 'nofollow'),
+            'additionalProperties' => false,
+            'properties' => array(
+                'post_id' => array(
+                    'type' => 'integer',
+                ),
+                'edit_url' => array(
+                    'type' => array('string', 'null'),
+                ),
+                'permalink' => array(
+                    'type' => array('string', 'null'),
+                ),
+                'title' => array(
+                    'type' => 'string',
+                ),
+                'description' => array(
+                    'type' => 'string',
+                ),
+                'keyword' => array(
+                    'type' => 'string',
+                ),
+                'canonical' => array(
+                    'type' => 'string',
+                ),
+                'noindex' => array(
+                    'type' => 'boolean',
+                ),
+                'nofollow' => array(
+                    'type' => 'boolean',
+                ),
+            ),
+        );
+    }
+
+    /**
+     * @return array
+     */
+    private function site_seo_output_schema() {
+        $bool = array('type' => 'boolean');
+        $url = array('type' => 'string');
+        return array(
+            'type' => 'object',
+            'additionalProperties' => false,
+            'properties' => array(
+                'site_url' => $url,
+                'blog_public' => $bool,
+                'schema' => $bool,
+                'schema_aggregation' => $bool,
+                'schema_aggregation_url' => $url,
+                'sitemap' => $bool,
+                'sitemap_url' => $url,
+                'llms_txt' => $bool,
+                'llms_txt_url' => $url,
+                'llms_full' => $bool,
+                'indexnow' => $bool,
+                'social_tags' => $bool,
+                'search_console_connected' => $bool,
+                'abilities_api' => $bool,
+                'mcp_adapter' => $bool,
+                'mcp_endpoint' => $url,
+                'wp_ai_client' => $bool,
+            ),
+        );
     }
 
     /**
@@ -233,6 +506,117 @@ class AISEO_Abilities {
             'social_tags' => $feature_on('aiseo_enable_social_tags'),
             'search_console_connected' => $gsc_connected,
             'abilities_api' => true,
+            'mcp_adapter' => self::adapter_is_active(),
+            'mcp_endpoint' => self::adapter_is_active() ? self::adapter_endpoint() : '',
+            'wp_ai_client' => class_exists('AISEO_WP_AI') && AISEO_WP_AI::is_ready(),
+        );
+    }
+
+    /**
+     * @param mixed $input Ability input.
+     * @return array|WP_Error
+     */
+    public function generate_post_seo($input = array()) {
+        $input = $this->input_array($input);
+        $post_id = isset($input['post_id']) ? absint($input['post_id']) : 0;
+        $post = $post_id ? get_post($post_id) : null;
+        if (!$post instanceof WP_Post) {
+            return new WP_Error('aiseo_post_missing', __('Post not found.', 'aiseo'));
+        }
+        $fields = isset($input['fields']) && is_array($input['fields']) ? $input['fields'] : array('title', 'description');
+        $fields = array_values(array_intersect($fields, array('title', 'description')));
+        if ($fields === array()) {
+            $fields = array('title', 'description');
+        }
+        $keyword = get_post_meta($post_id, '_aiseo_focus_keyword', true);
+        $keyword = is_string($keyword) ? $keyword : '';
+        $content = $post->post_title . "\n\n" . wp_strip_all_tags((string) $post->post_content);
+        $api = new AISEO_API();
+        $out = array(
+            'post_id' => $post_id,
+        );
+        if (in_array('title', $fields, true)) {
+            $title = $api->generate_title($content, $keyword);
+            if (is_wp_error($title)) {
+                return $title;
+            }
+            $out['title'] = (string) $title;
+        }
+        if (in_array('description', $fields, true)) {
+            $description = $api->generate_meta_description($content, $keyword);
+            if (is_wp_error($description)) {
+                return $description;
+            }
+            $out['description'] = (string) $description;
+        }
+        return $out;
+    }
+
+    /**
+     * @param mixed $input Ability input.
+     * @return array
+     */
+    public function get_sitemap_resource($input = array()) {
+        unset($input);
+        $on = !in_array(get_option('aiseo_enable_sitemap', '1'), array(false, 0, '0', ''), true);
+        return array(
+            'url' => home_url('/sitemap_index.xml'),
+            'enabled' => $on,
+        );
+    }
+
+    /**
+     * @param mixed $input Ability input.
+     * @return array
+     */
+    public function get_llms_resource($input = array()) {
+        unset($input);
+        $on = !in_array(get_option('aiseo_enable_llms', '1'), array(false, 0, '0', ''), true);
+        return array(
+            'url' => home_url('/llms.txt'),
+            'enabled' => $on,
+        );
+    }
+
+    /**
+     * @param mixed $input Ability input.
+     * @return array|WP_Error
+     */
+    public function list_posts_seo($input = array()) {
+        $input = $this->input_array($input);
+        $post_type = isset($input['post_type']) ? sanitize_key((string) $input['post_type']) : 'post';
+        if ($post_type === '' || !post_type_exists($post_type)) {
+            return new WP_Error('aiseo_post_type', __('Unknown post type.', 'aiseo'));
+        }
+        $limit = isset($input['limit']) ? absint($input['limit']) : 10;
+        if ($limit < 1) {
+            $limit = 10;
+        }
+        if ($limit > 20) {
+            $limit = 20;
+        }
+        $ids = get_posts(array(
+            'post_type' => $post_type,
+            'post_status' => array('publish', 'draft', 'pending', 'future', 'private'),
+            'posts_per_page' => $limit,
+            'fields' => 'ids',
+            'orderby' => 'modified',
+            'order' => 'DESC',
+            'no_found_rows' => true,
+        ));
+        $posts = array();
+        foreach ($ids as $post_id) {
+            if (!current_user_can('edit_post', $post_id)) {
+                continue;
+            }
+            $item = $this->get_post_seo(array('post_id' => (int) $post_id));
+            if (!is_wp_error($item)) {
+                $posts[] = $item;
+            }
+        }
+        return array(
+            'post_type' => $post_type,
+            'posts' => $posts,
         );
     }
 
@@ -251,10 +635,12 @@ class AISEO_Abilities {
         $description = get_post_meta($post_id, '_aiseo_meta_description', true);
         $keyword = get_post_meta($post_id, '_aiseo_focus_keyword', true);
         $canonical = get_post_meta($post_id, '_aiseo_canonical', true);
+        $edit_url = get_edit_post_link($post_id, 'raw');
+        $permalink = get_permalink($post_id);
         return array(
             'post_id' => $post_id,
-            'edit_url' => get_edit_post_link($post_id, 'raw'),
-            'permalink' => get_permalink($post_id),
+            'edit_url' => is_string($edit_url) ? $edit_url : null,
+            'permalink' => is_string($permalink) ? $permalink : null,
             'title' => is_string($title) ? $title : '',
             'description' => is_string($description) ? $description : '',
             'keyword' => is_string($keyword) ? $keyword : '',

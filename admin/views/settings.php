@@ -356,7 +356,9 @@ $analytics_settings = $analytics->get_settings();
             <div class="aiseo-form-group">
                 <label class="aiseo-form-label" for="aiseo_api_key">
                     <?php esc_html_e('OpenAI API Key', 'aiseo'); ?>
-                    <span class="required">*</span>
+                    <?php if (!(class_exists('AISEO_WP_AI') && AISEO_WP_AI::is_ready())) : ?>
+                        <span class="required">*</span>
+                    <?php endif; ?>
                 </label>
                 <input type="password" 
                        id="aiseo_api_key"
@@ -365,8 +367,13 @@ $analytics_settings = $analytics->get_settings();
                        class="large-text"
                        placeholder="sk-..." />
                 <span class="aiseo-form-description">
-                    <?php esc_html_e('Get your API key from', 'aiseo'); ?> 
-                    <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>
+                    <?php if (class_exists('AISEO_WP_AI') && AISEO_WP_AI::is_ready()) : ?>
+                        <?php esc_html_e('WordPress 7.0 Connectors are active, so this key is optional. Generation uses Settings → Connectors first.', 'aiseo'); ?>
+                    <?php else : ?>
+                        <?php esc_html_e('Get your API key from', 'aiseo'); ?>
+                        <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>.
+                        <?php esc_html_e('On WordPress 7.0 or later you can use Settings → Connectors instead.', 'aiseo'); ?>
+                    <?php endif; ?>
                 </span>
             </div>
             
@@ -551,11 +558,24 @@ $analytics_settings = $analytics->get_settings();
                 <p class="aiseo-form-label"><?php esc_html_e('AI assistants (MCP)', 'aiseo'); ?></p>
                 <?php if (class_exists('AISEO_Abilities') && AISEO_Abilities::is_supported()) : ?>
                     <p class="description">
-                        <?php esc_html_e('This site is on WordPress 6.9 or later, so Praison AI SEO registers abilities for site SEO status, post SEO fields, and IndexNow. Install the official WordPress MCP Adapter plugin if you want Claude or ChatGPT to call those tools. They use the signed-in user’s capabilities; they do not invent search rankings.', 'aiseo'); ?>
+                        <?php esc_html_e('This site is on WordPress 6.9 or later. Praison AI SEO registers abilities for site SEO status, listing, updating, and generating post SEO fields, IndexNow, plus sitemap and llms.txt resources. Assistants use the signed-in user’s capabilities. They do not invent search rankings.', 'aiseo'); ?>
                     </p>
+                    <p class="description">
+                        <code><?php echo esc_html(AISEO_Abilities::rest_list_url()); ?></code>
+                    </p>
+                    <?php if (AISEO_Abilities::adapter_is_active()) : ?>
+                        <p class="description">
+                            <?php esc_html_e('Official MCP Adapter is active. Point Claude, Cursor, or ChatGPT at:', 'aiseo'); ?>
+                            <code><?php echo esc_html(AISEO_Abilities::adapter_endpoint()); ?></code>
+                        </p>
+                    <?php else : ?>
+                        <p class="description">
+                            <?php esc_html_e('Install the official WordPress MCP Adapter plugin to expose these abilities as MCP tools on /wp-json/mcp/mcp-adapter-default-server.', 'aiseo'); ?>
+                        </p>
+                    <?php endif; ?>
                 <?php else : ?>
                     <p class="description">
-                        <?php esc_html_e('WordPress 6.9 or later is required for MCP abilities (the same Abilities API Rank Math and AIOSEO use). This site will register them automatically after you update WordPress.', 'aiseo'); ?>
+                        <?php esc_html_e('WordPress 6.9 or later is required for MCP abilities. This site will register them automatically after you update WordPress.', 'aiseo'); ?>
                     </p>
                 <?php endif; ?>
             </div>
