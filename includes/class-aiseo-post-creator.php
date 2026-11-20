@@ -55,6 +55,34 @@ class AISEO_Post_Creator {
         );
         
         $args = wp_parse_args($args, $defaults);
+
+        $post_type = sanitize_key($args['post_type']);
+        $post_type_object = get_post_type_object($post_type);
+        if (!$post_type_object || empty($post_type_object->cap->create_posts) || !current_user_can($post_type_object->cap->create_posts)) {
+            return new WP_Error('rest_cannot_create', __('You are not allowed to create this type of post.', 'aiseo'));
+        }
+
+        $current_user_id = get_current_user_id();
+        if (!$current_user_id) {
+            return new WP_Error('rest_forbidden', __('You must be logged in to create a post.', 'aiseo'));
+        }
+
+        $requested_author = absint($args['post_author']);
+        if (!$requested_author || ($requested_author !== $current_user_id && !current_user_can($post_type_object->cap->edit_others_posts))) {
+            $requested_author = $current_user_id;
+        }
+
+        $post_status = sanitize_key($args['post_status']);
+        if ($post_status === 'publish' && !current_user_can($post_type_object->cap->publish_posts)) {
+            return new WP_Error('rest_cannot_publish', __('You are not allowed to publish posts.', 'aiseo'));
+        }
+        if (!in_array($post_status, array('draft', 'pending', 'publish', 'private', 'future'), true)) {
+            $post_status = 'draft';
+        }
+
+        $args['post_type'] = $post_type;
+        $args['post_status'] = $post_status;
+        $args['post_author'] = $requested_author;
         
         // Use structured output to generate both title and content together
         $structured_result = $this->generate_post_with_structured_output(

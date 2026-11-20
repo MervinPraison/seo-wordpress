@@ -588,6 +588,12 @@ class AISEO_Admin {
             $block_content = $this->convert_html_to_blocks($content);
             
             // Create post with the provided content
+            $post_type_object = get_post_type_object($post_type);
+            if (!$post_type_object || empty($post_type_object->cap->create_posts) || !current_user_can($post_type_object->cap->create_posts)) {
+                wp_send_json_error('Permission denied');
+                return;
+            }
+
             $post_data = array(
                 'post_title' => $topic,
                 'post_content' => $block_content,
@@ -959,6 +965,10 @@ class AISEO_Admin {
         $failed_count = 0;
         
         foreach ($posts as $post) {
+            if (!current_user_can('edit_post', $post->ID)) {
+                continue;
+            }
+
             // Find images in post content
             preg_match_all('/<img[^>]+>/i', $post->post_content, $matches);
             
@@ -1567,6 +1577,10 @@ class AISEO_Admin {
         if (!$post_id || empty($value)) {
             wp_send_json_error('Invalid data');
         }
+
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
+        }
         
         // Update post meta for SEO title
         update_post_meta($post_id, '_aiseo_title', $value);
@@ -1589,6 +1603,10 @@ class AISEO_Admin {
         
         if (!$post_id || empty($value)) {
             wp_send_json_error('Invalid data');
+        }
+
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
         }
         
         // Update post meta for SEO description
@@ -1661,6 +1679,10 @@ class AISEO_Admin {
         $post = get_post($post_id);
         if (!$post) {
             wp_send_json_error('Post not found');
+        }
+
+        if (!current_user_can('edit_post', $post_id)) {
+            wp_send_json_error('Permission denied');
         }
         
         // Generate alt text from image filename

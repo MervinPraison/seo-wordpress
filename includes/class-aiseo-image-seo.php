@@ -76,6 +76,10 @@ class AISEO_Image_SEO {
         if (!wp_attachment_is_image($image_id)) {
             return new WP_Error('invalid_image', __('Invalid image ID', 'aiseo'));
         }
+
+        if (!current_user_can('edit_post', $image_id)) {
+            return new WP_Error('rest_forbidden', __('You are not allowed to edit this image.', 'aiseo'));
+        }
         
         // Get image data
         $post_id = wp_get_post_parent_id($image_id);

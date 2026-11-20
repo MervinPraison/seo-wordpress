@@ -854,7 +854,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/cpt/enable', array(
             'methods' => 'POST',
             'callback' => array($this, 'enable_cpt'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'post_type' => array(
                     'required' => true,
@@ -867,7 +867,7 @@ class AISEO_REST {
         register_rest_route(self::NAMESPACE, '/cpt/disable', array(
             'methods' => 'POST',
             'callback' => array($this, 'disable_cpt'),
-            'permission_callback' => array($this, 'check_permission'),
+            'permission_callback' => array($this, 'check_admin_permission'),
             'args' => array(
                 'post_type' => array(
                     'required' => true,

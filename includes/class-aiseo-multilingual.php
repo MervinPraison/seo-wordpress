@@ -341,6 +341,17 @@ class AISEO_Multilingual {
      * @return array Result
      */
     public function copy_metadata_to_translation($source_post_id, $target_post_id, $overwrite = false) {
+        $source_post_id = absint($source_post_id);
+        $target_post_id = absint($target_post_id);
+
+        if (!current_user_can('edit_post', $source_post_id) || !current_user_can('edit_post', $target_post_id)) {
+            return [
+                'success' => false,
+                'copied' => 0,
+                'skipped' => 0,
+            ];
+        }
+
         $meta_keys = [
             '_aiseo_meta_title',
             '_aiseo_meta_description',

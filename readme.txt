@@ -2,8 +2,8 @@
 Contributors: MervinPraison
 Tags: seo, ai, openai, schema, sitemap
 Requires at least: 5.0
-Tested up to: 6.9
-Stable tag: 5.0.9
+Tested up to: 7.1
+Stable tag: 5.0.11
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -164,6 +164,13 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 
 == Changelog ==
 
+= 5.0.11 =
+* Security: Check edit_post for each post in the bulk image alt handler, so a Contributor cannot rewrite images on posts they do not own
+* Security: Require the post type's create_posts capability before creating a draft from generated content
+
+= 5.0.10 =
+* Security: Require a per-post edit_post capability check before bulk, import, export, and AJAX SEO metadata changes, so a Contributor cannot modify posts they do not own
+
 = 5.0.9 =
 * Remove the global browser-console AJAX interceptor that logged every AISEO request's payload and nonce to devtools
 * Remove remaining leftover debug console.log statements from the admin screens, metabox, and image SEO scripts
@@ -237,6 +244,12 @@ Yes! AISEO is compatible with WPML, Polylang, and TranslatePress. It can sync me
 * Performance optimizations
 
 == Upgrade Notice ==
+
+= 5.0.11 =
+Important security update. The bulk image alt tool now checks that you can edit each post before changing it. Please update immediately.
+
+= 5.0.10 =
+Important security update. Bulk, import, export, and AJAX SEO changes now require permission to edit each post. Please update immediately.
 
 = 5.0.9 =
 Removes leftover debug logging that exposed AJAX payloads and nonces in the browser console on wp-admin pages.
